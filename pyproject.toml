@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fomo-trade-spy"
+version = "0.1.0"
+description = "Evidence-ranked FOMO discovery and latency-aware copy trading"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "httpx>=0.28,<0.29", "websockets>=15,<16", "pydantic>=2.11,<3",
+  "sqlalchemy>=2.0,<2.1", "alembic>=1.16,<2", "textual>=5,<9",
+  "typer>=0.16,<1", "eth-account>=0.13,<0.14", "eth-abi>=5,<6",
+  "solders>=0.26,<0.28", "base58>=2.1,<3"
+]
+[project.scripts]
+fomo-spy = "fomo_spy.cli:app"
+[dependency-groups]
+dev = ["pytest>=8,<9", "pytest-asyncio>=1,<2", "ruff>=0.12,<1"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/fomo_spy"]
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+[tool.ruff]
+line-length = 100
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

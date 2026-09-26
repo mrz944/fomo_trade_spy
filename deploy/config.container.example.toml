@@ -1,0 +1,18 @@
+mode = "paper"
+state_dir = "/state"
+socket = "/run/fomo-spy/daemon.sock"
+fomo_key_file = "/run/secrets/fomo_api"
+candidates = 50
+follow = 5
+monthly_credits = 250000
+credit_reserve = 20000
+
+[paper]
+capital_usd = "1000"
+buy_usd = "25"
+exposure_usd = "250"
+positions = 10
+daily_loss_usd = "50"
+slippage_bps = 100
+adverse_bps = 50
+max_fee_usd = "5"

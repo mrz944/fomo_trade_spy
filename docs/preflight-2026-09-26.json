@@ -1,0 +1,123 @@
+{
+  "at": 1790403177.8717902,
+  "mode": "paper",
+  "network_checks": true,
+  "funded_transactions_submitted": 0,
+  "infrastructure": {
+    "python": "3.12.14",
+    "platform": "Darwin",
+    "podman": null,
+    "systemctl": null
+  },
+  "fomo_key_configured": false,
+  "chains": [
+    {
+      "name": "solana",
+      "enabled": true,
+      "relay_listed": true,
+      "relay_deposits": true,
+      "rpc_network": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+      "quote": {
+        "provider": "relay",
+        "input": 25000000,
+        "output": 207550307,
+        "fee_usd": "0.007232",
+        "executable_steps": 1
+      }
+    },
+    {
+      "name": "ethereum",
+      "enabled": true,
+      "relay_listed": true,
+      "relay_deposits": true,
+      "rpc_network": 1,
+      "quote": {
+        "provider": "relay",
+        "input": 25000000,
+        "output": 9302738923986810,
+        "fee_usd": "0.144285",
+        "executable_steps": 2
+      }
+    },
+    {
+      "name": "base",
+      "enabled": true,
+      "relay_listed": true,
+      "relay_deposits": true,
+      "rpc_network": 8453,
+      "quote": {
+        "provider": "relay",
+        "input": 25000000,
+        "output": 9300436030934702,
+        "fee_usd": "0.021884",
+        "executable_steps": 2
+      }
+    },
+    {
+      "name": "bsc",
+      "enabled": true,
+      "relay_listed": true,
+      "relay_deposits": true,
+      "rpc_network": 56,
+      "quote": {
+        "provider": "relay",
+        "input": 25000000000000000000,
+        "output": 32310316671851440,
+        "fee_usd": "0.046906",
+        "executable_steps": 2
+      }
+    },
+    {
+      "name": "monad",
+      "enabled": true,
+      "relay_listed": true,
+      "relay_deposits": true,
+      "rpc_network": 143,
+      "quote": {
+        "provider": "relay",
+        "input": 25000000,
+        "output": 945690664224484360192,
+        "fee_usd": "0.003515",
+        "executable_steps": 2
+      }
+    },
+    {
+      "name": "robinhood",
+      "enabled": true,
+      "relay_listed": true,
+      "relay_deposits": true,
+      "rpc_network": 4663,
+      "quote": {
+        "provider": "relay",
+        "input": 25000000,
+        "output": 9301276684770195,
+        "fee_usd": "0.057637",
+        "executable_steps": 2
+      }
+    },
+    {
+      "name": "arc",
+      "enabled": true,
+      "relay_listed": true,
+      "relay_deposits": true,
+      "rpc_network": 5042,
+      "quote": "no verified non-settlement probe token"
+    }
+  ],
+  "limitations": [
+    "FOMO authenticated schemas and streaming require an account; no complete history guarantee",
+    "Social feed omits small trades and cannot establish exact fill inventory",
+    "Live execution is restricted to reviewed EVM v2 routers and Solana Raydium CPMM pools; unverified with funded wallets",
+    "Automatic live bridging is blocked pending validated bridge transaction decoding",
+    "Direct FOMO public scraping captures embedded JSON only; no verified trade feed"
+  ],
+  "fomo_health": {
+    "ok": true,
+    "traders": 8,
+    "uptime": 32270.683145565,
+    "code": {
+      "hash": "d2e5e408c2c5becd",
+      "files": 15
+    }
+  }
+}

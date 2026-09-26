@@ -1,0 +1,70 @@
+# Copy to ignored config.toml; chmod 600 config.toml.
+mode = "paper"
+state_dir = "state/real"
+# socket = "/run/user/1000/fomo-spy/daemon.sock"
+# fomo_key_file = "/absolute/path/to/0600-fomo-key"
+# Alternatively export FOMO_API_KEY. Never put keys directly in this file.
+candidates = 50
+follow = 5
+monthly_credits = 250000
+credit_reserve = 20000
+# Seven-day CACHE expiry, not an observation/eligibility waiting period.
+discovery_ttl = 604800
+history_pages = 3
+max_signal_age = 30
+rpc_poll_seconds = 2.0
+max_catchup_blocks = 1000
+auto_bridge = false  # Paper only: current Relay cross-chain quotes, with adverse output/fees.
+bridge_max_usd = "100"
+# Optional audited, normalized 30-day fills; see docs/history-format.md.
+# history_import = "/absolute/path/to/history.json"
+# Optional public embedded-JSON capture. It is NOT a verified trading feed.
+direct_fomo_urls = []
+
+[paper]
+capital_usd = "1000"
+buy_usd = "25"
+exposure_usd = "250"
+positions = 10
+daily_loss_usd = "50"
+slippage_bps = 100
+adverse_bps = 50
+max_fee_usd = "5"
+
+# Omit [[chains]] to use all seven defaults in config.py.
+# Specifying [[chains]] REPLACES that list; include every chain you want enabled.
+# Example Base-only customization:
+# [[chains]]
+# name = "base"
+# fomo_id = 8453
+# relay_id = 8453
+# kind = "evm"
+# rpc = "https://base.drpc.org"
+# ws = "wss://base.drpc.org"
+# settlement = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+# decimals = 6
+# enabled = true
+# confirmations = 2
+# wallet = "YOUR_DEDICATED_PUBLIC_WALLET"
+# secret_file = "/run/secrets/base_wallet"
+# router = "REVIEWED_V2_ROUTER_ADDRESS"
+# router_code_hash = "0xKECCAK_OF_REVIEWED_RUNTIME_BYTECODE"
+# max_gas_native = "0.0001"
+
+# Live requires mode="live", live_enabled=true, all explicit limits below,
+# prefunded dedicated wallets, secret mounts and reviewed execution configuration.
+# No live trading was performed during development. Never use your personal wallet.
+# [live]
+# capital_usd = "100"
+# buy_usd = "5"
+# exposure_usd = "20"
+# positions = 2
+# daily_loss_usd = "5"
+# slippage_bps = 100
+# adverse_bps = 0
+# max_fee_usd = "1"
+
+# Solana live additionally requires solana_program_data_hash = "SHA256_OF_PROGRAMDATA"
+# and a token->pool mapping in [chains.solana_pools], reviewed for the fixed Raydium
+# CPMM program. Only direct settlement-token pairs with legacy SPL Token work.
+# Secret format: Solana CLI JSON keypair array or base58 64-byte keypair.
