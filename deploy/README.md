@@ -77,7 +77,8 @@ eligibility; see [integration limitations](../docs/integrations.md).
 
 ## Build and initial installation
 
-Clone `master` into the source directory above. Build from a clean checkout of
+Run this installation block in `bash` (the host's default interactive shell is
+fish). Clone `master` into the source directory above. Build from a clean checkout of
 the exact published commit; set an OCI revision label and a commit-specific tag:
 
 ```sh
@@ -94,7 +95,8 @@ install -m 600 /dev/null ~/.fomo-trade-spy/env
 install -m 644 deploy/fomo-spy.container ~/.config/containers/systemd/fomo-spy.container
 install -m 755 deploy/fomo-spy-tui ~/.local/bin/fomo-spy-tui
 systemctl --user daemon-reload
-systemd-analyze --user verify fomo-spy.service
+env XDG_RUNTIME_DIR=/run/user/1000 systemd-analyze --user verify \
+  /run/user/1000/systemd/generator/fomo-spy.service
 systemctl --user start fomo-spy.service
 ```
 

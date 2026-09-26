@@ -1,6 +1,9 @@
 # Verification record
 
-Verified locally on 2026-09-26 with Python 3.12.14 on macOS.
+## Initial development verification
+
+Verified locally on 2026-09-26 with Python 3.12.14 on macOS. This section records
+the initial development checks; the later deployment checks are recorded below.
 
 - `pytest -q`: **67 passed**, including headless Textual controls, private Unix
   socket access, and complete demo daemon startup/shutdown/restart.
@@ -54,7 +57,33 @@ this absence of verification into a claim of production readiness.
    live bridge settlement/recovery. Optional paper bridging is implemented.
 5. Establish a permitted, stable direct-FOMO data contract. Public embedded-JSON
    capture works, but it does not currently supply normalized discovery/trade data.
-6. Verify Arc token routes and run the supplied container/Quadlet on rootless Linux.
+6. Verify Arc token routes. The rootless Linux deployment is now exercised below.
 
 These are real limitations. They are exposed in README, readiness, preflight and
 errors; no synthetic fallback is used to pretend real integrations succeeded.
+
+## Rootless deployment verification, 2026-09-26
+
+Published `master` to `mrz944/fomo_trade_spy` and built the published checkout
+on `cyberdev@100.111.109.33` using rootless Podman 6.1.2. The new missing-key
+daemon test and a focused-input Ctrl-Q detach assertion pass: **68 tests passed**
+on macOS and **68 passed** inside the Linux container, with lint passing on both.
+
+The generated Quadlet validates using its full path under
+`/run/user/1000/systemd/generator/`. `fomo-spy.service` starts successfully and
+the container health check passes. Runtime inspection confirms UID/GID 1000,
+read-only root, no effective capabilities, no-new-privileges and no published
+ports. Config, environment file, SQLite database and Unix socket are 0600;
+the state and socket directories are 0700. The default-target startup link is
+present and user lingering is enabled.
+
+Both installed TUI launchers were attached through real terminals. Controls
+reach the same paper daemon and Ctrl-Q detaches without stopping it. The daemon
+reports real (non-demo) paper state, $1,000 equity, zero candidates/positions/orders,
+zero used FOMO credits, and discovery/streaming unavailable because the key is
+missing. Public RPC connectivity does not establish trading integration readiness.
+
+The final deployed revision, image ID, restart/persistence checks and comparison
+of existing service identities are recorded in the private deployment receipt
+`~/.fomo-trade-spy/deployment.json` on Linux. See the
+[deployment guide](../deploy/README.md) for launchers, credentials and management.
