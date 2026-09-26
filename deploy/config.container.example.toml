@@ -1,7 +1,8 @@
 mode = "paper"
 state_dir = "/state"
 socket = "/run/fomo-spy/daemon.sock"
-fomo_key_file = "/run/secrets/fomo_api"
+# FOMO_API_KEY is supplied by the private host environment file.
+# Without a key, discovery/streaming stay explicitly unavailable; no demo fallback.
 candidates = 50
 follow = 5
 monthly_credits = 250000

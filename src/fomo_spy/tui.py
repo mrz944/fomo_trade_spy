@@ -6,6 +6,7 @@ from pathlib import Path
 
 from textual import on
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Header, Input, Static, TabbedContent, TabPane
@@ -49,6 +50,7 @@ class SpyApp(App):
     Input { dock: bottom; }
     """
     BINDINGS = [
+        Binding("ctrl+q", "quit", "Detach", priority=True),
         ("q", "quit", "Detach"),
         ("p", "pause", "Pause entries"),
         ("r", "resume", "Resume entries"),

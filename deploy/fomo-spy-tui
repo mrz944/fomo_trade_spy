@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+exec podman exec -it fomo-spy fomo-spy tui --socket /run/fomo-spy/daemon.sock

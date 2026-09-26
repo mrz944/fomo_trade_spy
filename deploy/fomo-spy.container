@@ -1,28 +1,27 @@
 [Unit]
-Description=FOMO trader discovery and copy-trading daemon
+Description=FOMO Trade Spy (paper)
 After=network-online.target
 Wants=network-online.target
 
 [Container]
 Image=localhost/fomo-trade-spy:0.1.0
-ContainerName=fomo-trade-spy
+ContainerName=fomo-spy
 UserNS=keep-id
-User=%U
-Group=%G
+User=1000
+Group=1000
 ReadOnly=true
 NoNewPrivileges=true
 DropCapability=ALL
-Volume=%h/.local/share/fomo-trade-spy:/state:Z
+EnvironmentFile=%h/.fomo-trade-spy/env
+Volume=%h/.fomo-trade-spy/data:/state:Z
 Volume=%t/fomo-spy:/run/fomo-spy:Z
-Volume=%h/.config/fomo-trade-spy/config.toml:/etc/fomo-spy/config.toml:ro,Z
-Secret=fomo-api,type=mount,target=fomo_api,uid=%U,gid=%G,mode=0400
-# Add a separate secret mount for each enabled live wallet, e.g.:
-# Secret=fomo-base-wallet,type=mount,target=base_wallet,uid=%U,gid=%G,mode=0400
+Volume=%h/.fomo-trade-spy/config.toml:/etc/fomo-spy/config.toml:ro,Z
 Tmpfs=/tmp:rw,noexec,nosuid,nodev,size=32m
 HealthCmd=fomo-spy healthcheck --socket /run/fomo-spy/daemon.sock
 HealthInterval=30s
 HealthTimeout=10s
 HealthRetries=3
+HealthStartPeriod=30s
 HealthOnFailure=kill
 Exec=run --config /etc/fomo-spy/config.toml
 
@@ -32,7 +31,7 @@ RestartSec=5
 TimeoutStartSec=120
 TimeoutStopSec=30
 UMask=0077
-ExecStartPre=/usr/bin/install -d -m 0700 %h/.local/share/fomo-trade-spy %t/fomo-spy
+ExecStartPre=/usr/bin/install -d -m 0700 %h/.fomo-trade-spy/data %t/fomo-spy
 
 [Install]
 WantedBy=default.target

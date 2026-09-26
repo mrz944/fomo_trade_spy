@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+exec ssh -t cyberdev@100.111.109.33 podman exec -it fomo-spy fomo-spy tui --socket /run/fomo-spy/daemon.sock

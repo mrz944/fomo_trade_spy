@@ -133,6 +133,17 @@ class Fomo:
         }
 
     async def stream(self, callback, health, stop: asyncio.Event):
+        if not self.key:
+            health(
+                "fomo_stream",
+                {
+                    "state": "unavailable",
+                    "reason": "FOMO_API_KEY missing; configure and restart",
+                    "at": now(),
+                },
+            )
+            await stop.wait()
+            return
         delay = 1
         while not stop.is_set():
             try:

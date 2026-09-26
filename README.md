@@ -168,35 +168,23 @@ rejected during configuration; it is not a fake live feature.
 
 ## Rootless Linux service
 
-Container and Quadlet files are supplied but were **not runtime-tested** here:
-this development host is macOS without Podman or systemd. Install rootless Podman
-with Quadlet support on the target Linux host, then run these commands there:
+The [deployment guide](deploy/README.md) describes the rootless service on
+`cyberdev@100.111.109.33`, including installation, credentials, verification and
+service management. The service and container are named `fomo-spy`; it runs in
+paper mode with the existing limits. Configuration, credentials and persistent
+SQLite data live under `~/.fomo-trade-spy`; the private socket lives under
+`$XDG_RUNTIME_DIR/fomo-spy`.
 
-```sh
-podman build -f Containerfile -t localhost/fomo-trade-spy:0.1.0 .
-install -d -m 700 ~/.config/fomo-trade-spy ~/.local/share/fomo-trade-spy
-install -d -m 700 ~/.config/containers/systemd
-cp deploy/config.container.example.toml ~/.config/fomo-trade-spy/config.toml
-chmod 600 ~/.config/fomo-trade-spy/config.toml
-podman secret create fomo-api /absolute/path/to/private-fomo-key
-cp deploy/fomo-spy.container ~/.config/containers/systemd/
-systemctl --user daemon-reload
-systemctl --user start fomo-spy.service
-systemctl --user status fomo-spy.service
-journalctl --user -u fomo-spy.service
-```
+On Linux or this Mac, attach with `~/.local/bin/fomo-spy-tui`. The Mac launcher
+uses SSH to open the same container TUI. Press `q` outside the command input to
+detach (or Ctrl-Q from any widget); the daemon keeps running. No TCP control port
+is exposed. Missing `FOMO_API_KEY` leaves discovery and streaming explicitly
+unavailable, without synthetic data. Adding a key requires restarting FOMO.
 
-The Quadlet install section attaches the generated service to the user's default
-target. Enable lingering for the service user with `loginctl enable-linger USER`
-if it must remain active after all login sessions end. This may require host
-administrator privileges. No remote deployment was performed by this project.
-
-Attach a host-installed TUI using
-`fomo-spy tui --socket "$XDG_RUNTIME_DIR/fomo-spy/daemon.sock"`, or run it inside the
-container with `podman exec -it fomo-trade-spy fomo-spy tui --socket /run/fomo-spy/daemon.sock`.
-The rootless daemon uses a read-only filesystem, dropped capabilities, no-new-
-privileges, separate persistent state/runtime mounts, mounted secrets, health
-checks and graceful SIGTERM. The container user maps to the host service user.
+The container runs as UID/GID 1000 with keep-id mapping, a read-only root,
+dropped capabilities, no-new-privileges, private state/runtime mounts, health
+checks and graceful SIGTERM. The Quadlet starts under the user default target;
+lingering is enabled on the deployment host.
 
 Back up SQLite with its online backup API (or stop the service before copying the
 DB and WAL). Do not copy an active `.sqlite` file alone. State, secrets, local

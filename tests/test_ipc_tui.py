@@ -75,6 +75,9 @@ async def test_tui_attaches_controls_and_detaches_without_daemon_exit(engine, se
         await pilot.pause()
         await pilot.click("#cancel")
         assert engine.snapshot()["positions"]
+        app.query_one("#command").focus()
+        await pilot.press("ctrl+q")
+        assert not app.is_running
     assert (await request(path, {"command": "ping"}))["alive"]
 
 

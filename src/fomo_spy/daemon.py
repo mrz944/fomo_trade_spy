@@ -67,6 +67,17 @@ class Daemon:
         return result
 
     async def discovery(self):
+        if not self.fomo.key:
+            self.engine.health(
+                "discovery",
+                {
+                    "state": "unavailable",
+                    "reason": "FOMO_API_KEY missing; configure and restart",
+                    "at": now(),
+                },
+            )
+            await self.stop.wait()
+            return
         while not self.stop.is_set():
             retry_after = self.cfg.discovery_ttl
             try:
