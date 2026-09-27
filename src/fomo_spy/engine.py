@@ -60,6 +60,13 @@ class Engine:
             if r["eligible"]
             and not r["excluded_by_user"]
             and now() - r["evaluated_at"] <= self.cfg.discovery_ttl
+            and (
+                not r.get("coverage")
+                or all(
+                    c.get("complete") and c.get("through", 0) >= now() - 300
+                    for c in r["coverage"].values()
+                )
+            )
         ][: self.cfg.follow]
 
     def watched(self):
@@ -812,6 +819,7 @@ class Engine:
                 "latest_decision": max(decisions, key=lambda x: x["at"]) if decisions else None,
             }
         return {
+            "workflow": self.workflow(events, orders),
             "mode": self.cfg.mode,
             "at": now(),
             "uptime": now() - self.started,
@@ -868,4 +876,61 @@ class Engine:
                 }
                 for c in self.cfg.chains
             ],
+        }
+
+    def workflow(self, events, orders):
+        ranks = self.rankings()
+        selected = self.selected()
+        evaluated = sum(r.get("state") == "evaluation complete" for r in ranks)
+        blockers = list(dict.fromkeys(g for r in ranks for g in r.get("missing", [])))
+        capabilities = self.store.items("history_capability:")
+        progress = {}
+        for chain in self.cfg.chains:
+            if chain.enabled:
+                rows = [r.get("coverage", {}).get(chain.name, {}) for r in ranks]
+                progress[chain.name] = {
+                    "wallets_complete": sum(bool(r.get("complete")) for r in rows),
+                    "wallets_total": len(rows),
+                    "transactions_scanned": sum(r.get("transactions", 0) for r in rows),
+                    "blocks_scanned": sum(
+                        max(0, r.get("next", 0) - r.get("lower", 0)) for r in rows
+                    ),
+                }
+        data = self.store.get("last_chain_data", {})
+        fresh_keys = {
+            e.key
+            for e in events
+            if e.data.get("provider") == "rpc"
+            and not e.data.get("historical")
+            and e.data.get("finalized")
+        }
+        observed = [o for o in orders if o.state == "filled" and o.event_key in fresh_keys]
+        state = "data unavailable"
+        if any(r.get("state") == "history reconstruction in progress" for r in ranks):
+            state = "history reconstruction in progress"
+        if ranks and evaluated == len(ranks):
+            state = "evaluation complete"
+        if selected:
+            state = "traders selected; awaiting observed execution"
+        if selected and observed and self.store.get("environment") == "real":
+            state = "paper execution observed"
+        return {
+            "daemon": "healthy",
+            "state": state,
+            "blockers": blockers,
+            "candidates": len(ranks),
+            "evaluated": evaluated,
+            "selected": len(selected),
+            "watched": len(self.watched()),
+            "last_chain_data": data or None,
+            "last_provider_data": self.store.get("last_provider_data"),
+            "last_history_data": self.store.get("last_history_data"),
+            "capabilities": capabilities,
+            "progress": progress,
+            "latest_trade_decision": (
+                {"status": events[0].status, "reason": events[0].reason, "at": events[0].received}
+                if events
+                else None
+            ),
+            "observed_fills": len(observed),
         }

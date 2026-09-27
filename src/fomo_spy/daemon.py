@@ -14,6 +14,7 @@ from .demo import DemoQuotes, seed
 from .domain import D, Fill, Signal, now
 from .engine import Engine
 from .execution import LiveExecutor
+from .history import History
 from .ipc import Control
 from .providers import Fomo, Relay, scrape_public_fomo
 from .ranking import rank
@@ -45,6 +46,7 @@ class Daemon:
         self.quotes = DemoQuotes(cfg) if demo else (live or Relay(cfg, self.http))
         self.engine = Engine(cfg, self.store, self.quotes, live, rpc_http=self.http)
         self.fomo = Fomo(cfg, self.store, self.http)
+        self.history = History(cfg, self.store, self.http, self.engine.health)
         self.control = Control(self.engine, self.fomo.credits)
         self.stop = asyncio.Event()
         self.monitor = Monitor(
@@ -82,6 +84,11 @@ class Daemon:
             retry_after = self.cfg.discovery_ttl
             try:
                 traders = await self.fomo.discover()
+                # Retain leaderboard order and candidates even if history calls
+                # subsequently hit the monitoring credit reserve.
+                for trader in traders:
+                    if trader.get("userId"):
+                        self.store.put("trader:" + trader["userId"], trader)
                 for trader in traders:
                     uid = trader.get("userId")
                     if not uid:
@@ -89,10 +96,7 @@ class Daemon:
                     self.store.put("trader:" + uid, trader)
                     history = await self.fomo.history(uid)
                     self.store.put("history_raw:" + uid, history)
-                    if not self.store.get("evidence_import:" + uid):
-                        evidence = rank([], complete_30d=False)
-                        evidence["missing"] = history["missing"]
-                        self.store.put("ranking:" + uid, evidence)
+                    self.history.evaluate(trader)
                 self.engine.health(
                     "discovery", {"state": "ready", "candidates": len(traders), "at": now()}
                 )
@@ -129,7 +133,10 @@ class Daemon:
                 raise ValueError("history trader ID mismatch")
             if any(f.provenance.startswith("SYNTHETIC") for f in fills):
                 raise ValueError("synthetic data may not be imported into real state")
-            evidence = rank(fills, complete_30d=item.get("complete_30d", False))
+            evidence = rank(fills, complete_30d=False)
+            evidence["missing"] = [
+                "imported coverage claims require independent chain reconstruction"
+            ]
             evidence["provenance"] = item.get("provenance", "operator-imported history")
             self.store.put("ranking:" + uid, evidence)
             self.store.put("trader:" + uid, {k: item[k] for k in ("userId", "handle", "wallets")})
@@ -157,6 +164,27 @@ class Daemon:
                 "reason": "app feed lacks exact fills/tx hashes; never trade from positionValueUsd",
             },
         )
+
+    async def reconstruct(self):
+        while not self.stop.is_set():
+            traders = sorted(
+                self.store.items("trader:").values(), key=lambda t: t.get("rank", 10000)
+            )
+            for trader in traders:
+                if self.stop.is_set():
+                    return
+                try:
+                    await self.history.step(trader)
+                except Exception as exc:
+                    self.engine.health(
+                        "history",
+                        {"state": "data unavailable", "error": type(exc).__name__, "at": now()},
+                    )
+                await asyncio.sleep(0)
+            try:
+                await asyncio.wait_for(self.stop.wait(), timeout=self.cfg.history_refresh_seconds)
+            except TimeoutError:
+                pass
 
     async def maintenance(self):
         last_mark = 0
@@ -221,6 +249,7 @@ class Daemon:
             tasks.extend(
                 [
                     asyncio.create_task(self.discovery()),
+                    asyncio.create_task(self.reconstruct()),
                     asyncio.create_task(
                         self.fomo.stream(self.social, self.engine.health, self.stop)
                     ),

@@ -97,6 +97,7 @@ class Fomo:
             raise Unavailable(f"FOMO HTTP {response.status_code}; check account/quota")
         response.raise_for_status()
         data = response.json()
+        self.store.put("last_provider_data", {"at": now(), "provider": "FOMO REST"})
         self.store.put(cache_key, {"at": now(), "data": data})
         return data
 
@@ -109,7 +110,8 @@ class Fomo:
         return data.get("traders", [])[: self.cfg.candidates]
 
     async def history(self, user_id: str):
-        pages, cursor, seen = [], None, set()
+        pages, cursor, seen_cursors, seen_ids = [], None, set(), set()
+        stopped = "configured page budget"
         for _ in range(self.cfg.history_pages):
             params = {"limit": 100}
             if cursor:
@@ -117,19 +119,30 @@ class Fomo:
             page = await self.get(
                 f"/v2/users/{quote(user_id, safe='')}/swaps", params, ttl=self.cfg.discovery_ttl
             )
-            pages.append(page)
-            cursor = page.get("nextCursor")
-            if not cursor or cursor in seen:
+            ids = {str(r["swapId"]) for r in page.get("swaps", []) if r.get("swapId")}
+            if pages and not ids - seen_ids:
+                stopped = "repeated or empty page"
                 break
-            seen.add(cursor)
-        # Raw rows retained for diagnosis; undocumented fill fields are NOT guessed.
+            pages.append(page)
+            seen_ids.update(ids)
+            cursor = page.get("nextCursor")
+            if (
+                page.get("sourceCapped")
+                or page.get("truncated")
+                or (page.get("cap") and len(seen_ids) >= page["cap"])
+            ):
+                stopped = "provider history cap"
+                break
+            if not cursor or cursor in seen_cursors:
+                stopped = "cursor exhausted or repeated"
+                break
+            seen_cursors.add(cursor)
         return {
             "pages": pages,
+            "unique_swaps": len(seen_ids),
+            "stopped": stopped,
             "complete_30d": False,
-            "missing": [
-                "provider does not document a full fill schema with historical fees",
-                "RPC backfill or an audited normalized history import is required",
-            ],
+            "missing": ["FOMO swaps are discovery evidence only; complete chain scans required"],
         }
 
     async def stream(self, callback, health, stop: asyncio.Event):
@@ -191,6 +204,9 @@ class Fomo:
                                 },
                             )
                         elif data.get("type") == "alert":
+                            self.store.put(
+                                "last_provider_data", {"at": now(), "provider": "FOMO alerts"}
+                            )
                             await callback(data, bool(data.get("replay")))
                             self.store.put("social_cursor", {"ts": data.get("ts", now())})
                         if stop.is_set():

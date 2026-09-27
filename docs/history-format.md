@@ -1,17 +1,14 @@
 # Evidence import contract
 
-FOMO discovery is automatic. Its public documentation does not provide a complete
-individual-fill schema with historical fee valuations. Raw `/swaps` pages are cached,
-with the coverage gap visible; their aggregate PnL is never treated as matched evidence.
-Until an authenticated adapter has been validated, use `history_import` for audited
-normalized records. This is an explicit integration limitation, not a seven-day wait.
+FOMO discovery and parsing of authenticated `/swaps` payloads are automatic.
+Rows deduplicate by user ID and swap ID. They are discovery/cross-check evidence;
+missing transaction hashes, fees and capped coverage prevent treating them as a
+complete ledger. Native chain reconstruction supplies ranking fills separately.
 
-The file is read at daemon startup. Each trader must use FOMO's stable `userId` and
-verified on-chain main wallets, not throwaway app signers. `complete_30d` must reflect
-actual coverage, including transfers and opening inventory. A `true` value is an
-operator assertion, not something the software independently proves. The bot excludes
-unknown-cost or unknown-fee token histories and rejects unmatched sells. It does not
-invent historical prices. Imports never enter the signal queue or generate orders.
+The legacy `history_import` interface remains readable at startup for diagnostics.
+Its `complete_30d` flag is **not trusted for eligibility**. Independent chain scans
+and inventory reconciliation must establish coverage. Imported records never enter
+the signal queue or generate orders. See [current implementation and blockers](history-workflow.md).
 
 ```json
 {
@@ -39,7 +36,8 @@ invent historical prices. Imports never enter the signal queue or generate order
 ```
 
 Use decimal strings. `side` is buy/sell/transfer/airdrop, never perpetual. The `usd`
-value excludes separately reported network/route fees. Null fee/cost is unknown, not
+value is net wallet consideration, already including route fees; only separately
+measured network fees are added. Never charge route fees twice. Null fee/cost is unknown, not
 zero. Include pre-window buys needed to match sells inside the 30-day window. A
 completed position is a full inventory cycle from flat to flat; splitting one sell
 into multiple fills does not manufacture completed positions. Entire contaminated

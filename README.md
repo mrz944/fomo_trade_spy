@@ -4,16 +4,19 @@ A separate Python 3.12 daemon, Textual terminal client, evidence-ranking engine,
 and paper/live copy-trading implementation. This repository does not use or modify
 `solana_spy_trader`.
 
-**Status: implemented and offline-tested; production integration is incomplete.**
-The executable demo works without keys. FOMO discovery/history/stream clients are
-implemented against the current documentation, but authenticated payloads were not
-available for validation. Automatic eligibility from those raw history payloads is
-therefore blocked; audited normalized history can establish eligibility immediately.
-There is no observation waiting period. Live execution is real, restricted code for
-reviewed EVM v2 routers and Solana Raydium CPMM pools, not a simulated live mode.
-Those live paths have not been exercised against funded wallets. General Relay live
-signing, automatic live bridging, complete historical RPC indexing, and a normalized
-direct-FOMO scraping feed remain unfinished. Do not treat this as production-ready.
+**Status: paper workflow implementation tested; seven-chain production acceptance is blocked.**
+Discovery now parses authenticated cached swaps, and a durable chain-evidence worker
+replaces the empty-history placeholder. EVM reconstruction is resumable, extends
+backwards for opening inventory, and requires historical balances, receipts, logs,
+native discovery/traces, and inventory reconciliation. Historical prices and gaps
+are persisted. No provider flag or imported coverage assertion can qualify a trader.
+
+The seven configured free endpoints did not establish the required capabilities in
+the 2026-09-27 probes. Solana closed-token-account indexing/reconciliation and some
+chain-specific native fee models remain unfinished. Missing evidence is displayed
+as data unavailable, separately from an evaluated trader failing the original
+profitability rules. No fresh real-source paper fill has yet been observed.
+See [workflow evidence and blockers](docs/history-workflow.md).
 
 ## Run locally
 
@@ -70,8 +73,8 @@ are reflected in executable quote output. No executable quote means no paper fil
 Discovery starts from FOMO's 30-day trader leaderboard, caches up to 50 candidates,
 and selects up to five eligible traders. It never starts from generic trending
 pools. Each source with copied inventory remains watched after deselection or
-exclusion. The seven-day cache TTL is unrelated to eligibility. Imported matched
-30-day evidence can qualify at startup; it never generates copy signals. See
+exclusion. The seven-day cache TTL is unrelated to eligibility. Complete reconstructed
+30-day evidence can qualify automatically; history never generates copy signals. See
 [history format](docs/history-format.md).
 
 Default eligibility requires 20 complete inventory cycles, five tokens, three
@@ -91,10 +94,10 @@ repeated fills of one winner cannot manufacture independent evidence.
   Solana slot subscriptions wake finalized per-wallet signature scans. Polling
   fallback is two seconds. Configured EVM confirmation depth and Solana finality
   add visible latency. Large catch-up gaps halt instead of silently jumping ahead.
-- RPC normalization currently handles unambiguous single-token versus configured
-  settlement-token balance exchanges. Native-currency routes, complex bundles,
-  transfers and unknown routes are classified for reconciliation, not guessed.
-  This limits coverage of FOMO traders using native-token swaps.
+- History and monitoring share wallet-delta normalization for settlement and
+  native swaps, wrapped-native movements, gas and Solana account rent. Missing
+  traces, unsupported fees and ambiguous bundles remain unknown or transfers.
+  Unsupported native pricing/fee models cannot produce profitable evidence.
 - Events deduplicate by chain/transaction/source/token. Source histories, replay,
   startup catch-up and events older than 30 seconds cannot open entries. Freshness
   is checked again after quoting and before live signing. Delayed exits may copy

@@ -76,6 +76,40 @@ class Ledger(Base):
     details: Mapped[dict] = mapped_column(JSON)
 
 
+class EvidenceFill(Base):
+    __tablename__ = "evidence_fills"
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    trader: Mapped[str] = mapped_column(String, index=True)
+    chain: Mapped[str] = mapped_column(String)
+    timestamp: Mapped[float] = mapped_column(Float)
+    data: Mapped[dict] = mapped_column(JSON)
+
+
+class ScanCheckpoint(Base):
+    __tablename__ = "scan_checkpoints"
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    data: Mapped[dict] = mapped_column(JSON)
+
+
+class HistoricalValuation(Base):
+    __tablename__ = "historical_valuations"
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    data: Mapped[dict] = mapped_column(JSON)
+
+
+class CoverageGap(Base):
+    __tablename__ = "coverage_gaps"
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    data: Mapped[dict] = mapped_column(JSON)
+
+
+class ProviderSwap(Base):
+    __tablename__ = "provider_swaps"
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    trader: Mapped[str] = mapped_column(String, index=True)
+    data: Mapped[dict] = mapped_column(JSON)
+
+
 class Store:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -100,10 +134,10 @@ class Store:
             tables = inspect(connection).get_table_names()
             # Only adopt the exact pre-migration development schema; never silently alter unknown tables.
             if "kv" in tables and "alembic_version" not in tables:
-                expected = set(Base.metadata.tables)
+                expected = {"kv", "events", "positions", "orders", "cash", "ledger"}
                 if set(tables) != expected:
                     raise ValueError("unversioned database schema is not recognized")
-                for table in Base.metadata.tables.values():
+                for table in (Base.metadata.tables[name] for name in expected):
                     actual = {
                         column["name"] for column in inspect(connection).get_columns(table.name)
                     }

@@ -19,6 +19,7 @@ class Chain(Strict):
     relay_id: int
     kind: Literal["evm", "solana"] = "evm"
     rpc: str
+    historical_rpc: str | None = None
     ws: str = ""
     settlement: str
     decimals: int = Field(6, ge=0, le=18)
@@ -143,6 +144,8 @@ class Settings(Strict):
     credit_reserve: int = Field(20000, ge=0)
     discovery_ttl: int = Field(7 * 86400, ge=60)
     fomo_min_request_interval: float = Field(1.1, ge=0.1)
+    history_batch_blocks: int = Field(1000, ge=1, le=10000)
+    history_refresh_seconds: int = Field(300, ge=30)
     history_pages: int = Field(3, ge=1, le=100)
     max_signal_age: int = Field(30, ge=1, le=30)
     rpc_poll_seconds: float = Field(2, ge=0.2, le=10)

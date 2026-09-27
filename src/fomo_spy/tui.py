@@ -44,7 +44,7 @@ class SpyApp(App):
     TITLE = "FOMO Trade Spy"
     SUB_TITLE = "daemon client"
     CSS = """
-    #summary { height: 3; padding: 0 1; background: $boost; }
+    #summary { height: 4; padding: 0 1; background: $boost; }
     #message { height: 2; padding: 0 1; }
     DataTable { height: 1fr; }
     Input { dock: bottom; }
@@ -133,7 +133,10 @@ class SpyApp(App):
                 self.query_one("#summary", Static).update(
                     f"{s['mode'].upper()}  |  Equity ${s['equity_usd']}  |  "
                     f"Entries {'PAUSED' if s['paused'] else 'enabled'}  |  "
-                    f"Selected {len(s['selected'])} / Watching {len(s['watching'])}\nSocket: {self.socket}"
+                    f"Selected {len(s['selected'])} / Watching {len(s['watching'])}\n"
+                    f"Workflow: {s.get('workflow', {}).get('state', 'unknown')} | "
+                    f"Evaluated: {s.get('workflow', {}).get('evaluated', 0)}\n"
+                    f"{'; '.join(s.get('workflow', {}).get('blockers', [])[:1]) or 'Awaiting fresh source activity'}"
                 )
                 self.table(
                     "rankings",
@@ -201,6 +204,7 @@ class SpyApp(App):
                         ["Latency", json.dumps(s["latency"])],
                         ["Credits", json.dumps(s.get("credits", {}))],
                         ["Chain cash", json.dumps(s["cash"])],
+                        ["Workflow / coverage", json.dumps(s.get("workflow", {}))],
                     ],
                 )
                 self.table(

@@ -68,3 +68,6 @@ max_fee_usd = "5"
 # and a token->pool mapping in [chains.solana_pools], reviewed for the fixed Raydium
 # CPMM program. Only direct settlement-token pairs with legacy SPL Token work.
 # Secret format: Solana CLI JSON keypair array or base58 64-byte keypair.
+# Optional in each [[chains]] block: historical_rpc = "https://your-free-archive-rpc"
+# Defaults to that chain's rpc. Capability probes gate scans; endpoints need
+# historical balances, receipts, logs, native traces and native discovery.

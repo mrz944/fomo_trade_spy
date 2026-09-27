@@ -1,0 +1,14 @@
+{
+  "source": "online deployment backup 2026-09-27T20:49:14Z",
+  "migration": "0002",
+  "integrity": "ok",
+  "preserved_rows": {
+    "cash": 7,
+    "orders": 0,
+    "positions": 0,
+    "events": 0,
+    "ledger": 0,
+    "kv": 316
+  },
+  "all_original_rows_identical": true
+}

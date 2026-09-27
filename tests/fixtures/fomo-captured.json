@@ -1,0 +1,138 @@
+{
+  "provenance": "Authenticated deployed cache captured 2026-09-27; profile/media omitted; no credentials",
+  "trader": {
+    "userId": "36adb85a-c0fd-5fa8-916d-8fdc32fe4237",
+    "rank": 1,
+    "handle": "unipcs",
+    "wallets": {
+      "solana": "2heJbC32Tpfcb3nbUb5ER61K11FGZVfVGtVnDm6LDogF",
+      "evm": "0x0a6ebed0155edb4b21d92ad02897a626cd90119e",
+      "verified": true
+    }
+  },
+  "page": {
+    "key": "36adb85a-c0fd-5fa8-916d-8fdc32fe4237",
+    "kind": "swaps",
+    "userId": "36adb85a-c0fd-5fa8-916d-8fdc32fe4237",
+    "source": "live-fomo",
+    "count": 100,
+    "nextCursor": "fa529866-afde-45a8-8220-490abd40ebd8",
+    "held": 100,
+    "upstreamCalls": 1,
+    "upstreamAttempted": 1,
+    "partial": false,
+    "complete": false,
+    "sourceCapped": true,
+    "note": "Individual fills, newest first. FOMO serves at most 100 swaps per trader and offers no cursor past them, so this is a recent-fills window, not a full history. Each swap carries tradeIdIn/tradeIdOut, which join back to /v2/users/{handle}/trades (positions). For a complete history, take the wallets from /v2/users/{handle} and read the chain directly.",
+    "swaps": [
+      {
+        "swapId": "ac1d6bd0-d5a9-40d3-ac95-db913f7a5a35",
+        "chainId": 4663,
+        "tokenIn": {
+          "address": "0x385f4f8ae47651ce5f58f5265395a669f8281e18",
+          "amount": 995357.24,
+          "usd": 29999.07
+        },
+        "tokenOut": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": 29616.29,
+          "usd": 29595.74
+        },
+        "tradeIdIn": "91d31755-23e1-4e93-9272-ce4408fc4d2c",
+        "tradeIdOut": null,
+        "at": "2026-09-26T21:40:10.343Z",
+        "chain": "robinhood"
+      },
+      {
+        "swapId": "c6dd029f-7541-4882-95e4-297c6a8ad915",
+        "chainId": 56,
+        "tokenIn": {
+          "address": "0x21caef8a43163eea865baee23b9c2e327696a3bf",
+          "amount": 0.009166,
+          "usd": 39.2334
+        },
+        "tokenOut": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": 39.4434,
+          "usd": 39.4199
+        },
+        "tradeIdIn": "4dc9d068-3de6-4b85-b09b-d6591baa34dd",
+        "tradeIdOut": null,
+        "at": "2026-09-26T17:45:43.894Z",
+        "chain": "bsc"
+      },
+      {
+        "swapId": "4529bffc-462e-4efe-831d-d91bfaee0d3c",
+        "chainId": 1399811149,
+        "tokenIn": {
+          "address": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+          "amount": 2.18464,
+          "usd": 491.588
+        },
+        "tokenOut": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": 491.588,
+          "usd": 491.588
+        },
+        "tradeIdIn": "c08e405e-28e7-423e-a550-ffd309cd75de",
+        "tradeIdOut": null,
+        "at": "2026-09-26T17:45:08.938Z",
+        "chain": "solana"
+      },
+      {
+        "swapId": "8c505a88-ea84-4530-86f5-3448bafe6f4a",
+        "chainId": 4663,
+        "tokenIn": {
+          "address": "0x385f4f8ae47651ce5f58f5265395a669f8281e18",
+          "amount": 830786.18,
+          "usd": 25029.1
+        },
+        "tokenOut": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": 24451.13,
+          "usd": 24434.04
+        },
+        "tradeIdIn": "91d31755-23e1-4e93-9272-ce4408fc4d2c",
+        "tradeIdOut": null,
+        "at": "2026-09-26T17:45:22.077Z",
+        "chain": "robinhood"
+      },
+      {
+        "swapId": "596717fe-5b1b-41d3-9a61-d9fc4de3b577",
+        "chainId": 4663,
+        "tokenIn": {
+          "address": "0x385f4f8ae47651ce5f58f5265395a669f8281e18",
+          "amount": 827898.74,
+          "usd": 24942.11
+        },
+        "tokenOut": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": 24690.45,
+          "usd": 24673.37
+        },
+        "tradeIdIn": "91d31755-23e1-4e93-9272-ce4408fc4d2c",
+        "tradeIdOut": null,
+        "at": "2026-09-26T17:44:39.522Z",
+        "chain": "robinhood"
+      },
+      {
+        "swapId": "f148935f-74c0-4067-8e27-8b2a7623aa33",
+        "chainId": 4663,
+        "tokenIn": {
+          "address": "0x385f4f8ae47651ce5f58f5265395a669f8281e18",
+          "amount": 811161.81,
+          "usd": 24898.61
+        },
+        "tokenOut": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amount": 24665.48,
+          "usd": 24649.49
+        },
+        "tradeIdIn": "91d31755-23e1-4e93-9272-ce4408fc4d2c",
+        "tradeIdOut": null,
+        "at": "2026-09-26T16:01:32.910Z",
+        "chain": "robinhood"
+      }
+    ]
+  }
+}

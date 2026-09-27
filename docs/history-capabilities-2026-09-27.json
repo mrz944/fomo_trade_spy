@@ -1,0 +1,320 @@
+[
+  {
+    "chain": "solana",
+    "at": 1790542319.7200575,
+    "checks": {
+      "identity": {
+        "ok": true
+      },
+      "first_available": {
+        "ok": true
+      },
+      "signatures": {
+        "ok": true
+      },
+      "transaction": {
+        "ok": false,
+        "error": "RPC getTransaction failed (code -32015)"
+      },
+      "token_accounts": {
+        "ok": true
+      }
+    },
+    "valuation": {
+      "coins": {
+        "solana:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": {
+          "decimals": 6,
+          "symbol": "usdc",
+          "price": 0.999975387071693,
+          "timestamp": 1787950310,
+          "confidence": 0.99
+        }
+      }
+    }
+  },
+  {
+    "chain": "ethereum",
+    "at": 1790542319.7696576,
+    "window_block": 25856245,
+    "checks": {
+      "identity": {
+        "ok": true
+      },
+      "head": {
+        "ok": true
+      },
+      "historical_block": {
+        "ok": true
+      },
+      "historical_native_balance": {
+        "ok": false,
+        "error": "HTTPStatusError"
+      },
+      "historical_token_balance": {
+        "ok": false,
+        "error": "HTTPStatusError"
+      },
+      "wallet_logs": {
+        "ok": false,
+        "error": "HTTPStatusError"
+      },
+      "native_discovery": {
+        "ok": false,
+        "error": "HTTPStatusError"
+      },
+      "historical_receipt": {
+        "ok": true
+      },
+      "historical_trace": {
+        "ok": false,
+        "error": "RPC debug_traceTransaction failed (code -32601)"
+      }
+    },
+    "valuation": {
+      "coins": {
+        "ethereum:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "decimals": 6,
+          "symbol": "USDC",
+          "price": 0.999975387071693,
+          "timestamp": 1787950310,
+          "confidence": 0.99
+        }
+      }
+    }
+  },
+  {
+    "chain": "bsc",
+    "at": 1790542319.7702575,
+    "window_block": 118642736,
+    "checks": {
+      "identity": {
+        "ok": true
+      },
+      "head": {
+        "ok": true
+      },
+      "historical_block": {
+        "ok": true
+      },
+      "historical_native_balance": {
+        "ok": false,
+        "error": "HTTPStatusError"
+      },
+      "historical_token_balance": {
+        "ok": false,
+        "error": "HTTPStatusError"
+      },
+      "wallet_logs": {
+        "ok": false,
+        "error": "HTTPStatusError"
+      },
+      "native_discovery": {
+        "ok": false,
+        "error": "HTTPStatusError"
+      },
+      "historical_receipt": {
+        "ok": false,
+        "error": "HTTPStatusError"
+      },
+      "historical_trace": {
+        "ok": false,
+        "error": "RPC debug_traceTransaction failed (code -32601)"
+      }
+    },
+    "valuation": {
+      "coins": {
+        "bsc:0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d": {
+          "decimals": 18,
+          "symbol": "USDC",
+          "price": 0.999975387071693,
+          "timestamp": 1787950310,
+          "confidence": 0.99
+        }
+      }
+    }
+  },
+  {
+    "chain": "arc",
+    "at": 1790542319.7709358,
+    "window_block": 17989292,
+    "checks": {
+      "identity": {
+        "ok": true
+      },
+      "head": {
+        "ok": true
+      },
+      "historical_block": {
+        "ok": true
+      },
+      "historical_native_balance": {
+        "ok": true
+      },
+      "historical_token_balance": {
+        "ok": true
+      },
+      "wallet_logs": {
+        "ok": true
+      },
+      "native_discovery": {
+        "ok": false,
+        "error": "RPC trace_filter failed (code -32601)"
+      }
+    },
+    "valuation": {
+      "coins": {
+        "arc:0x3600000000000000000000000000000000000000": {
+          "decimals": 6,
+          "symbol": "USDC",
+          "price": 0.999975387071693,
+          "timestamp": 1787950310,
+          "confidence": 0.99
+        }
+      }
+    }
+  },
+  {
+    "chain": "base",
+    "at": 1790542319.7700093,
+    "window_block": 50580486,
+    "checks": {
+      "identity": {
+        "ok": true
+      },
+      "head": {
+        "ok": true
+      },
+      "historical_block": {
+        "ok": true
+      },
+      "historical_native_balance": {
+        "ok": true
+      },
+      "historical_token_balance": {
+        "ok": true
+      },
+      "wallet_logs": {
+        "ok": true
+      },
+      "native_discovery": {
+        "ok": false,
+        "error": "HTTPStatusError"
+      },
+      "historical_receipt": {
+        "ok": true
+      },
+      "historical_trace": {
+        "ok": true
+      }
+    },
+    "valuation": {
+      "coins": {
+        "base:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+          "decimals": 6,
+          "symbol": "USDC",
+          "price": 0.999975387071693,
+          "timestamp": 1787950310,
+          "confidence": 0.99
+        }
+      }
+    }
+  },
+  {
+    "chain": "robinhood",
+    "at": 1790542319.7707367,
+    "window_block": 48598033,
+    "checks": {
+      "identity": {
+        "ok": true
+      },
+      "head": {
+        "ok": true
+      },
+      "historical_block": {
+        "ok": true
+      },
+      "historical_native_balance": {
+        "ok": false,
+        "error": "RPC eth_getBalance failed (code -32000)"
+      },
+      "historical_token_balance": {
+        "ok": false,
+        "error": "RPC eth_call failed (code -32000)"
+      },
+      "wallet_logs": {
+        "ok": true
+      },
+      "native_discovery": {
+        "ok": false,
+        "error": "RPC trace_filter failed (code -32601)"
+      },
+      "historical_receipt": {
+        "ok": true
+      },
+      "historical_trace": {
+        "ok": false,
+        "error": "RPC debug_traceTransaction failed (code -32601)"
+      }
+    },
+    "valuation": {
+      "coins": {
+        "robinhood:0x5fc5360d0400a0fd4f2af552add042d716f1d168": {
+          "decimals": 6,
+          "symbol": "USDG",
+          "price": 0.9999871235093138,
+          "timestamp": 1787950310,
+          "confidence": 0.99
+        }
+      }
+    }
+  },
+  {
+    "chain": "monad",
+    "at": 1790542319.770536,
+    "window_block": 99998339,
+    "checks": {
+      "identity": {
+        "ok": true
+      },
+      "head": {
+        "ok": true
+      },
+      "historical_block": {
+        "ok": true
+      },
+      "historical_native_balance": {
+        "ok": false,
+        "error": "RPC eth_getBalance failed (code -32602)"
+      },
+      "historical_token_balance": {
+        "ok": false,
+        "error": "RPC eth_call failed (code -32602)"
+      },
+      "wallet_logs": {
+        "ok": true
+      },
+      "native_discovery": {
+        "ok": false,
+        "error": "RPC trace_filter failed (code -32053)"
+      },
+      "historical_receipt": {
+        "ok": true
+      },
+      "historical_trace": {
+        "ok": false,
+        "error": "RPC debug_traceTransaction failed (code -32053)"
+      }
+    },
+    "valuation": {
+      "coins": {
+        "monad:0x754704bc059f8c67012fed69bc8a327a5aafb603": {
+          "decimals": 6,
+          "symbol": "USDC",
+          "price": 0.999975387071693,
+          "timestamp": 1787950310,
+          "confidence": 0.99
+        }
+      }
+    }
+  }
+]

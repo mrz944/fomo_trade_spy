@@ -72,8 +72,9 @@ systemctl --user restart fomo-spy.service
 Add a single `FOMO_API_KEY=your-key` line without `export`. Do not put the key
 in Git, shell commands/history, the TOML config, or a wallet secret field.
 The process loads credentials at startup. Inspect the TUI health tab after
-restart. Even with a key, raw FOMO histories cannot yet establish automatic
-eligibility; see [integration limitations](../docs/integrations.md).
+restart. Raw FOMO histories alone cannot establish eligibility. Reconstruction probes
+historical RPC capabilities before scanning and retains explicit coverage blockers;
+see [current workflow evidence](../docs/history-workflow.md).
 
 ## Build and initial installation
 

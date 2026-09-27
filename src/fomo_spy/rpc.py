@@ -2,41 +2,28 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections import defaultdict
 
 import httpx
 import websockets
 
 from .config import Chain, Settings
 from .db import Store
-from .domain import D, Signal, now
+from .domain import now
+from .normalization import TRANSFER, evm_movements, solana_movements, topic
+from .normalization import log_delta as log_delta
 from .providers import Unavailable
-
-TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-
-
-def topic(wallet):
-    return "0x" + wallet.lower().removeprefix("0x").zfill(64)
-
-
-def log_delta(log, wallet):
-    if len(log.get("topics", [])) != 3 or log["topics"][0].lower() != TRANSFER:
-        return 0
-    value = int(log["data"], 16)
-    return value * (
-        (log["topics"][2].lower() == topic(wallet)) - (log["topics"][1].lower() == topic(wallet))
-    )
 
 
 class RPC:
-    def __init__(self, chain: Chain, http: httpx.AsyncClient):
+    def __init__(self, chain: Chain, http: httpx.AsyncClient, *, historical=False):
         self.chain, self.http = chain, http
+        self.endpoint = (chain.historical_rpc or chain.rpc) if historical else chain.rpc
         self.sequence = 0
 
     async def call(self, method, params=None):
         self.sequence += 1
         r = await self.http.post(
-            self.chain.rpc,
+            self.endpoint,
             json={"jsonrpc": "2.0", "id": self.sequence, "method": method, "params": params or []},
         )
         r.raise_for_status()
@@ -45,8 +32,8 @@ class RPC:
             raise Unavailable(f"RPC {method} failed (code {body['error'].get('code')})")
         return body["result"]
 
-    async def decimals(self, token):
-        return int(await self.call("eth_call", [{"to": token, "data": "0x313ce567"}, "latest"]), 16)
+    async def decimals(self, token, block="latest"):
+        return int(await self.call("eth_call", [{"to": token, "data": "0x313ce567"}, block]), 16)
 
     async def balance(self, token, wallet, block="latest"):
         return int(
@@ -151,12 +138,43 @@ class Monitor:
                 except TimeoutError:
                     pass
 
+    async def emit_movement(self, movement):
+        sig = movement.signal
+        previous = self.store.get(f"source_inventory:{sig.chain}:{sig.trader}:{sig.token}")
+        if (
+            previous
+            and previous["tx"] != sig.tx
+            and previous["block"] <= sig.block
+            and previous["quantity"] != str(sig.source_before)
+        ):
+            from .domain import D
+
+            if D(previous["quantity"]) != sig.source_before:
+                await self.reorg(sig.chain, sig.block)
+        await self.emit(sig)
+        self.store.put(
+            f"source_inventory:{sig.chain}:{sig.trader}:{sig.token}",
+            {
+                "quantity": str(sig.source_after),
+                "tx": sig.tx,
+                "block": sig.block,
+                "block_hash": sig.block_hash,
+                "at": sig.timestamp,
+            },
+        )
+        self.store.put("last_chain_data", {"at": now(), "chain": sig.chain, "tx": sig.tx})
+
     async def evm(self, rpc, wallets):
+        for trader, wallet in wallets.items():
+            await self.evm_wallet(rpc, {trader: wallet})
+
+    async def evm_wallet(self, rpc, wallets):
         chain = rpc.chain
         head = int(await rpc.call("eth_blockNumber"), 16) - chain.confirmations
         if head < 0:
             return
-        key = "cursor:evm:" + chain.name
+        trader, wallet = next(iter(wallets.items()))
+        key = f"cursor:evm:{chain.name}:{trader}:{wallet.lower()}"
         cursor = self.store.get(key)
         # First observation starts here; no unbounded scanning of arbitrary chain history.
         if not cursor:
@@ -207,49 +225,15 @@ class Monitor:
                 raise Unavailable("unstable receipt; retry scan")
             if int(receipt["status"], 16) != 1:
                 continue
+            try:
+                trace = await rpc.call("debug_traceTransaction", [tx, {"tracer": "callTracer"}])
+            except (Unavailable, httpx.HTTPError):
+                trace = None
             for trader, wallet in wallets.items():
-                deltas = defaultdict(int)
-                for log in receipt["logs"]:
-                    delta = log_delta(log, wallet)
-                    if delta:
-                        deltas[log["address"].lower()] += delta
-                settlement_delta = deltas.pop(chain.settlement.lower(), 0)
-                tokens = [(t, d) for t, d in deltas.items() if d]
-                # Multi-token bundles and native-only routes require a trace decoder; don't guess.
-                for token, delta in tokens:
-                    decimals = await rpc.decimals(token)
-                    before = await rpc.balance(token, wallet, hex(height - 1))
-                    for log in logs.values():
-                        if (
-                            int(log["blockNumber"], 16) == height
-                            and int(log["transactionIndex"], 16)
-                            < int(receipt["transactionIndex"], 16)
-                            and log["address"].lower() == token
-                        ):
-                            before += log_delta(log, wallet)
-                    side = (
-                        ("buy" if delta > 0 else "sell")
-                        if len(tokens) == 1 and delta * settlement_delta < 0
-                        else "transfer"
-                    )
-                    ts = int(block["timestamp"], 16)
-                    signal = Signal(
-                        trader=trader,
-                        chain=chain.name,
-                        token=token,
-                        side=side,
-                        quantity=D(abs(delta)) / 10**decimals,
-                        source_before=D(before) / 10**decimals,
-                        source_after=D(before + delta) / 10**decimals,
-                        token_decimals=decimals,
-                        tx=tx,
-                        block=height,
-                        block_hash=block["hash"],
-                        timestamp=ts,
-                        historical=ts < self.started,
-                        finalized=True,
-                    )
-                    await self.emit(signal)
+                for movement in await evm_movements(
+                    rpc, receipt, block, trader, wallet, list(logs.values()), self.started, trace
+                ):
+                    await self.emit_movement(movement)
         block = blocks.get(end) or await rpc.call("eth_getBlockByNumber", [hex(end), False])
         self.store.put(key, {"number": end, "hash": block["hash"]})
 
@@ -299,53 +283,13 @@ class Monitor:
                 )
                 if not tx:
                     raise Unavailable("finalized transaction unavailable")
-                for sig in solana_signals(
+                for movement in solana_movements(
                     tx, trader, wallet, row["signature"], rpc.chain, self.started
                 ):
-                    await self.emit(sig)
+                    await self.emit_movement(movement)
             if rows:
                 self.store.put(key, {"signature": rows[0]["signature"]})
 
 
 def solana_signals(tx, trader, wallet, signature, chain, started):
-    meta = tx["meta"]
-    if meta.get("err"):
-        return []
-    pre, post, decimals = defaultdict(int), defaultdict(int), {}
-    for field, values in [("preTokenBalances", pre), ("postTokenBalances", post)]:
-        for row in meta.get(field, []):
-            if row.get("owner") == wallet:
-                token = row["mint"]
-                values[token] += int(row["uiTokenAmount"]["amount"])
-                decimals[token] = row["uiTokenAmount"]["decimals"]
-    deltas = {t: post[t] - pre[t] for t in pre.keys() | post.keys() if post[t] != pre[t]}
-    settlement = deltas.pop(chain.settlement, 0)
-    signals = []
-    for token, delta in deltas.items():
-        side = (
-            ("buy" if delta > 0 else "sell")
-            if len(deltas) == 1 and delta * settlement < 0
-            else "transfer"
-        )
-        timestamp = tx.get("blockTime")
-        if timestamp is None:
-            continue
-        signals.append(
-            Signal(
-                trader=trader,
-                chain=chain.name,
-                token=token,
-                side=side,
-                quantity=D(abs(delta)) / 10 ** decimals[token],
-                source_before=D(pre[token]) / 10 ** decimals[token],
-                source_after=D(post[token]) / 10 ** decimals[token],
-                token_decimals=decimals[token],
-                tx=signature,
-                block=tx["slot"],
-                block_hash=str(tx["slot"]) + ":finalized",
-                timestamp=timestamp,
-                historical=timestamp < started,
-                finalized=True,
-            )
-        )
-    return signals
+    return [m.signal for m in solana_movements(tx, trader, wallet, signature, chain, started)]

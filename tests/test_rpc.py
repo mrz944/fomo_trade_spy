@@ -59,11 +59,11 @@ async def test_evm_restart_overlap_and_reorg(engine):
     reorg = AsyncMock()
     m = Monitor(engine.cfg, engine.store, None, lambda _: {}, engine.event, reorg, engine.health)
     await m.evm(rpc, {"trader": "0x" + "1" * 40})
-    assert engine.store.get("cursor:evm:base")["number"] == 100
-    engine.store.put("cursor:evm:base", {"number": 99, "hash": "orphan"})
+    assert engine.store.get("cursor:evm:base:trader:0x" + "1" * 40)["number"] == 100
+    engine.store.put("cursor:evm:base:trader:0x" + "1" * 40, {"number": 99, "hash": "orphan"})
     await m.evm(rpc, {"trader": "0x" + "1" * 40})
     reorg.assert_awaited_once_with("base", 99)
-    assert engine.store.get("cursor:evm:base")["number"] == 35
+    assert engine.store.get("cursor:evm:base:trader:0x" + "1" * 40)["number"] == 35
 
 
 async def test_unrecoverable_gap_is_visible_and_does_not_jump_cursor(engine):
@@ -74,10 +74,36 @@ async def test_unrecoverable_gap_is_visible_and_does_not_jump_cursor(engine):
         return hex(10000) if method == "eth_blockNumber" else {"hash": "canonical"}
 
     rpc.call.side_effect = call
-    engine.store.put("cursor:evm:base", {"number": 1, "hash": "canonical"})
+    engine.store.put("cursor:evm:base:trader:0x" + "1" * 40, {"number": 1, "hash": "canonical"})
     m = Monitor(
         engine.cfg, engine.store, None, lambda _: {}, engine.event, engine.reorg, engine.health
     )
     await m.evm(rpc, {"trader": "0x" + "1" * 40})
-    assert engine.store.get("cursor:evm:base")["number"] == 1
+    assert engine.store.get("cursor:evm:base:trader:0x" + "1" * 40)["number"] == 1
     assert engine.store.get("health:gap:base")["state"] == "blocked"
+
+
+async def test_new_wallet_starts_its_own_checkpoint_without_replaying(engine):
+    rpc = AsyncMock()
+    rpc.chain = engine.cfg.chain("base")
+
+    async def call(method, params=None):
+        if method == "eth_blockNumber":
+            return hex(102)
+        if method == "eth_getBlockByNumber":
+            return {"hash": "canonical", "timestamp": hex(int(now()))}
+        if method == "eth_getLogs":
+            return []
+        raise AssertionError(method)
+
+    rpc.call.side_effect = call
+    emitted = AsyncMock()
+    monitor = Monitor(
+        engine.cfg, engine.store, None, lambda _: {}, emitted, engine.reorg, engine.health
+    )
+    old, new = "0x" + "1" * 40, "0x" + "2" * 40
+    engine.store.put("cursor:evm:base:old:" + old, {"number": 99, "hash": "canonical"})
+    await monitor.evm(rpc, {"old": old, "new": new})
+    assert engine.store.get("cursor:evm:base:old:" + old)["number"] == 100
+    assert engine.store.get("cursor:evm:base:new:" + new)["number"] == 100
+    emitted.assert_not_called()
