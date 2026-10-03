@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
+from .activity import timeline
 from .config import Settings
 from .db import KV, Cash, Event, Ledger, Order, Position, Store
 from .domain import D, Quote, Signal, now
@@ -852,7 +853,7 @@ class Engine:
                 {k: getattr(o, k) for k in ("id", "side", "state", "created", "tx_hash", "error")}
                 for o in orders
             ],
-            "activity": [{"status": e.status, "reason": e.reason, **e.data} for e in events],
+            "activity": timeline(self.store, events),
             "health": self.store.items("health:"),
             "latency": {
                 "by_chain": by_chain,

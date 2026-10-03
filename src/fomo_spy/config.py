@@ -20,6 +20,7 @@ class Chain(Strict):
     kind: Literal["evm", "solana"] = "evm"
     rpc: str
     historical_rpc: str | None = None
+    historical_rpc_interval: float = Field(0.6, ge=0, le=10)
     ws: str = ""
     settlement: str
     decimals: int = Field(6, ge=0, le=18)

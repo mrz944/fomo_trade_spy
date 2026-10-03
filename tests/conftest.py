@@ -10,6 +10,7 @@ from fomo_spy.engine import Engine
 @pytest.fixture
 def cfg(tmp_path):
     chain = next(c for c in default_chains() if c.name == "base")
+    chain.historical_rpc_interval = 0
     return Settings(state_dir=tmp_path / "private", chains=[chain])
 
 

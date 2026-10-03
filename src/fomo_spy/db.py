@@ -28,6 +28,13 @@ class Event(Base):
     received: Mapped[float] = mapped_column(Float)
 
 
+class Observation(Base):
+    __tablename__ = "observations"
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    received: Mapped[float] = mapped_column(Float, index=True)
+    data: Mapped[dict] = mapped_column(JSON)
+
+
 class Position(Base):
     __tablename__ = "positions"
     id: Mapped[str] = mapped_column(String, primary_key=True)

@@ -1,0 +1,76 @@
+{
+  "elapsed_seconds": 86402.5035738945,
+  "samples": 1387,
+  "successful_samples": 1387,
+  "completed": true,
+  "fresh_paper_execution_observed": false,
+  "accounting_errors": [],
+  "backup": "/home/cyberdev/.fomo-trade-spy/data/before-0003-20261003.sqlite",
+  "first_at": 1790570303.9007301,
+  "last_at": 1790656703.8407936,
+  "credits_first": {
+    "spent": 49000,
+    "remaining_header": 212750,
+    "blocked": false
+  },
+  "credits_last": {
+    "spent": 53500,
+    "remaining_header": 211000,
+    "blocked": false
+  },
+  "last_accounting": {
+    "integrity": "ok",
+    "cash": "1000.000000000000000000000000",
+    "ledger_cash_delta": "0",
+    "implied_initial_capital": "1000.000000000000000000000000",
+    "orders": {},
+    "reconciliation_flags": 0
+  },
+  "last_progress": {
+    "solana": {
+      "wallets_complete": 0,
+      "wallets_total": 50,
+      "transactions_scanned": 600,
+      "blocks_scanned": 0
+    },
+    "ethereum": {
+      "wallets_complete": 0,
+      "wallets_total": 50,
+      "transactions_scanned": 0,
+      "blocks_scanned": 0
+    },
+    "base": {
+      "wallets_complete": 0,
+      "wallets_total": 50,
+      "transactions_scanned": 0,
+      "blocks_scanned": 0
+    },
+    "bsc": {
+      "wallets_complete": 0,
+      "wallets_total": 50,
+      "transactions_scanned": 0,
+      "blocks_scanned": 0
+    },
+    "monad": {
+      "wallets_complete": 0,
+      "wallets_total": 50,
+      "transactions_scanned": 0,
+      "blocks_scanned": 0
+    },
+    "robinhood": {
+      "wallets_complete": 0,
+      "wallets_total": 50,
+      "transactions_scanned": 0,
+      "blocks_scanned": 0
+    },
+    "arc": {
+      "wallets_complete": 0,
+      "wallets_total": 50,
+      "transactions_scanned": 0,
+      "blocks_scanned": 0
+    }
+  },
+  "selected": [],
+  "watching": [],
+  "service": "ActiveState=active\nMainPID=1451133\nNRestarts=0"
+}

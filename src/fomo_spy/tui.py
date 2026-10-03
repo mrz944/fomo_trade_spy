@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
 from pathlib import Path
 
 from textual import on
@@ -97,7 +98,7 @@ class SpyApp(App):
                 "Without best $",
                 "Missing / reasons",
             ],
-            "activity": ["Chain", "Trader", "Side", "Token", "Status", "Reason", "Delay ms"],
+            "activity": ["Time", "Source", "Chain", "Trader", "Side", "Token", "Status", "Reason"],
             "positions": [
                 "Position ID",
                 "Trader",
@@ -160,13 +161,14 @@ class SpyApp(App):
                     "activity",
                     [
                         [
+                            datetime.fromtimestamp(a["received"]).strftime("%H:%M:%S"),
+                            a.get("kind", "trade decision"),
                             a["chain"],
                             a["trader"],
                             a["side"],
                             a["token"],
                             a["status"],
                             a["reason"],
-                            round((a["received"] - a["timestamp"]) * 1000),
                         ]
                         for a in s["activity"]
                     ],

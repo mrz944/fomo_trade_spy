@@ -8,6 +8,7 @@ import signal
 
 import httpx
 
+from .activity import observe
 from .config import Settings
 from .db import Store
 from .demo import DemoQuotes, seed
@@ -146,18 +147,45 @@ class Daemon:
         uid, eid = data.get("userId"), data.get("eventId")
         if not uid or not eid or data.get("alertType") not in ("buy", "sell"):
             return
-        if uid not in self.engine.watched():
-            return
-        if self.store.get("social:" + eid):
-            return
         ts = data.get("ts")
         ts = float(ts) / 1000 if isinstance(ts, (int, float)) and ts > 10**12 else ts
-        lag = now() - ts if isinstance(ts, (int, float)) else None
-        self.store.put("social:" + eid, {"data": data, "received": now(), "historical": historical})
+        ts = ts if isinstance(ts, (int, float)) else None
+        lag = now() - ts if ts is not None else None
+        watched = uid in self.engine.watched()
+        token = data.get("token") or {}
+        chain_id = data.get("chainId", data.get("networkId"))
+        chain = next((c.name for c in self.cfg.chains if str(c.fomo_id) == str(chain_id)), "")
+        reason = (
+            "Replay: observation only"
+            if historical
+            else "Awaiting exact RPC transaction identity"
+            if watched
+            else "Trader not selected; observation only"
+        )
+        if not observe(
+            self.store,
+            "fomo:" + str(eid),
+            kind="FOMO alert",
+            trader=uid,
+            chain=chain or str(data.get("chain") or ""),
+            side=data["alertType"],
+            token=data.get("tokenAddress")
+            or (
+                (token.get("address") or token.get("symbol") or "")
+                if isinstance(token, dict)
+                else str(token)
+            ),
+            timestamp=ts,
+            status="observed",
+            reason=reason,
+        ):
+            return
         self.engine.health(
-            "social:" + uid,
+            "social:" + uid if watched else "social_feed",
             {
-                "state": "observed; awaiting RPC transaction identity",
+                "state": "observed; awaiting RPC transaction identity"
+                if watched
+                else "receiving alerts; no selected trader required",
                 "delay_seconds": lag,
                 "at": now(),
                 "historical": historical,

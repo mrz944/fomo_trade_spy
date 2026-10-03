@@ -118,3 +118,28 @@ async def test_complete_demo_daemon_start_stop_and_restart(tmp_path):
         assert store.get("paused:paper") is True
         assert store.get("environment") == "synthetic-demo"
         store.close()
+
+
+async def test_tui_renders_observation_when_no_traders_selected(engine, server):
+    from textual.widgets import DataTable
+
+    from fomo_spy.activity import observe
+    from fomo_spy.tui import SpyApp
+
+    path, _ = server
+    observe(
+        engine.store,
+        "alert",
+        kind="FOMO alert",
+        chain="solana",
+        trader="unselected",
+        side="buy",
+        token="token",
+        status="observed",
+        reason="Trader not selected",
+    )
+    app = SpyApp(path)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        assert app.query_one("#activity", DataTable).row_count >= 1
+        assert any(r["kind"] == "FOMO alert" for r in app.last_snapshot["activity"])

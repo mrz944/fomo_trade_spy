@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+import weakref
 
 import httpx
 import websockets
@@ -13,23 +15,70 @@ from .normalization import TRANSFER, evm_movements, solana_movements, topic
 from .normalization import log_delta as log_delta
 from .providers import Unavailable
 
+# Solana v1 keeps canonical pre/post balances and meta.fee in jsonParsed.
+# This is read support only; signing remains in the restricted live executor.
+SOLANA_READ_VERSION = 1
+RPC_LIMITS = weakref.WeakKeyDictionary()
+
+
+class RPCBackoff(Unavailable):
+    def __init__(self, seconds):
+        self.seconds = seconds
+        super().__init__(f"RPC rate limited; retry in {int(seconds)} seconds")
+
 
 class RPC:
     def __init__(self, chain: Chain, http: httpx.AsyncClient, *, historical=False):
         self.chain, self.http = chain, http
         self.endpoint = (chain.historical_rpc or chain.rpc) if historical else chain.rpc
         self.sequence = 0
+        self.historical = historical
 
     async def call(self, method, params=None):
+        limits = RPC_LIMITS.setdefault(self.http, {})
+        gate = limits.setdefault(self.endpoint, {"lock": asyncio.Lock(), "next": 0, "cooldown": 0})
+        if gate["cooldown"] > time.monotonic():
+            raise RPCBackoff(gate["cooldown"] - time.monotonic())
+        if self.historical:
+            async with gate["lock"]:
+                await asyncio.sleep(max(0, gate["next"] - time.monotonic()))
+                if gate["cooldown"] > time.monotonic():
+                    raise RPCBackoff(gate["cooldown"] - time.monotonic())
+                gate["next"] = time.monotonic() + self.chain.historical_rpc_interval
         self.sequence += 1
         r = await self.http.post(
             self.endpoint,
             json={"jsonrpc": "2.0", "id": self.sequence, "method": method, "params": params or []},
         )
+        try:
+            body = r.json()
+        except ValueError:
+            body = {}
+        error = body.get("error") if isinstance(body, dict) else None
+        message = str(error.get("message", "")).lower() if isinstance(error, dict) else ""
+        if r.status_code == 429 or (
+            error and ("rate limit" in message or "too many requests" in message)
+        ):
+            try:
+                delay = max(60, min(3600, float(r.headers.get("retry-after", "60"))))
+            except ValueError:
+                delay = 60
+            gate["cooldown"] = time.monotonic() + delay
+            raise RPCBackoff(delay)
+        # Persist safe categories, never provider messages containing URLs/keys.
+        if error:
+            if "archive" in message and ("token" in message or "key" in message):
+                raise Unavailable(f"RPC {method}: archive access requires a provider token")
+            if "historical state" in message or "missing trie" in message:
+                raise Unavailable(f"RPC {method}: historical state unavailable")
+            if "not allowed to access method" in message:
+                raise Unavailable(f"RPC {method}: endpoint does not permit this method")
+            if isinstance(error, dict) and error.get("code") == -32601:
+                raise Unavailable(f"RPC {method}: method unsupported by endpoint")
         r.raise_for_status()
-        body = r.json()
-        if body.get("error"):
-            raise Unavailable(f"RPC {method} failed (code {body['error'].get('code')})")
+        if error:
+            code = error.get("code") if isinstance(error, dict) else "unknown"
+            raise Unavailable(f"RPC {method} failed (code {code})")
         return body["result"]
 
     async def decimals(self, token, block="latest"):
@@ -70,9 +119,12 @@ class Monitor:
         wake = asyncio.Event()
         watcher = asyncio.create_task(self.wake_ws(chain, wake))
         try:
-            await rpc.check_network()
+            network_ready = False
             while not self.stop.is_set():
                 try:
+                    if not network_ready:
+                        await rpc.check_network()
+                        network_ready = True
                     wallets = self.wallets(chain)
                     if wallets:
                         if chain.kind == "evm":
@@ -277,7 +329,7 @@ class Monitor:
                         {
                             "encoding": "jsonParsed",
                             "commitment": "finalized",
-                            "maxSupportedTransactionVersion": 0,
+                            "maxSupportedTransactionVersion": SOLANA_READ_VERSION,
                         },
                     ],
                 )

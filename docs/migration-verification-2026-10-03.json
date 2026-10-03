@@ -1,0 +1,55 @@
+{
+  "migration": "0002 -> 0003",
+  "integrity": "ok",
+  "existing_rows_preserved": true,
+  "tables": {
+    "cash": {
+      "rows": 7,
+      "sha256": "de25bd45676a92e32df2e95fe2535391d4b5a051056e2918f4d7e95b05e08c4f"
+    },
+    "events": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "kv": {
+      "rows": 381,
+      "sha256": "99a93feea3134779ae288047968ab838c8f8a6de90f6bd1255b73186c1aaf919"
+    },
+    "ledger": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "orders": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "positions": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "scan_checkpoints": {
+      "rows": 24,
+      "sha256": "5136e0bab8a43e220a62bb80e748438d9799958458cb988ae043b4985f209072"
+    },
+    "historical_valuations": {
+      "rows": 3838,
+      "sha256": "20fbfd75edf4433b7df1674ab6180bbc3739ea3bc0e852a644f5c8efd91febec"
+    },
+    "coverage_gaps": {
+      "rows": 350,
+      "sha256": "abd34ee06708abdba26c3379350aec40e9ddc7e3f93f2eca50da3efd092b6cb9"
+    },
+    "evidence_fills": {
+      "rows": 6232,
+      "sha256": "ed4d2d6415af548ec3d6b8719ab831c28715460b7349355c8051e84d7e033a03"
+    },
+    "provider_swaps": {
+      "rows": 4906,
+      "sha256": "1119efa55d3cf72a829409a2b9429ad43959681bf5469c58c0aef7b42754f52b"
+    },
+    "observations": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    }
+  }
+}

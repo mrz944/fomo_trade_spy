@@ -1,5 +1,9 @@
 # Paper workflow implementation and acceptance
 
+For the October 3 inactivity investigation, repair and completed observation report,
+see [current findings](inactivity-2026-10-03.md). The endpoint failures below are the
+original September 27 observations, not a current operational acceptance claim.
+
 ## What changed
 
 Discovery preserves the leaderboard order and cached candidate data under quota

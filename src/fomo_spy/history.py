@@ -14,7 +14,7 @@ from .domain import D, Fill, now
 from .normalization import NATIVE_PRICE, TRANSFER, evm_movements, solana_movements, topic
 from .providers import Unavailable
 from .ranking import rank
-from .rpc import RPC
+from .rpc import RPC, SOLANA_READ_VERSION, RPCBackoff
 
 
 def read(store, model, key, default=None):
@@ -117,7 +117,18 @@ class Prices:
 
 
 async def block_at(rpc, timestamp, head):
-    lo, hi = 0, head
+    # Bracket from the recent head instead of probing years-old midpoint blocks.
+    hi, distance = head, 1024
+    lo = max(0, head - distance)
+    while lo:
+        block = await rpc.call("eth_getBlockByNumber", [hex(lo), False])
+        if not block:
+            raise Unavailable("historical block unavailable")
+        if int(block["timestamp"], 16) <= timestamp:
+            break
+        hi = lo
+        distance *= 2
+        lo = max(0, head - distance)
     while lo < hi:
         mid = (lo + hi + 1) // 2
         block = await rpc.call("eth_getBlockByNumber", [hex(mid), False])
@@ -144,6 +155,8 @@ async def probe(rpc, wallet, at):
             return result
         except Exception as exc:
             report["checks"][name] = {"ok": False, "reason": failure(exc)}
+            if isinstance(exc, RPCBackoff):
+                report["retry_after"] = max(report.get("retry_after", 0), exc.seconds)
             return None
 
     try:
@@ -151,6 +164,8 @@ async def probe(rpc, wallet, at):
         report["checks"]["identity"] = {"ok": True}
     except Exception as exc:
         report["checks"]["identity"] = {"ok": False, "reason": failure(exc)}
+        if isinstance(exc, RPCBackoff):
+            report["retry_after"] = exc.seconds
         return report
     if c.kind == "evm":
         head = await check("head", "eth_blockNumber")
@@ -160,6 +175,8 @@ async def probe(rpc, wallet, at):
             height = await block_at(rpc, at - 30 * 86400, int(head, 16))
         except Exception as exc:
             report["checks"]["window_block"] = {"ok": False, "reason": failure(exc)}
+            if isinstance(exc, RPCBackoff):
+                report["retry_after"] = exc.seconds
             return report
         report["window_block"] = height
         tag = hex(height)
@@ -211,7 +228,7 @@ async def probe(rpc, wallet, at):
                     {
                         "encoding": "jsonParsed",
                         "commitment": "finalized",
-                        "maxSupportedTransactionVersion": 0,
+                        "maxSupportedTransactionVersion": SOLANA_READ_VERSION,
                     },
                 ],
             )
@@ -269,6 +286,7 @@ class History:
             provenance="canonical RPC wallet deltas; historical DefiLlama consideration; gas separate",
         )
         data = {
+            "received": now(),
             "fill": fill.model_dump(mode="json"),
             "signal": sig.model_dump(mode="json"),
             "consideration": str(movement.consideration)
@@ -351,9 +369,19 @@ class History:
             endpoint = hashlib.sha256(rpc.endpoint.encode()).hexdigest()
             cap_key = "history_capability:" + c.name
             cap = self.store.get(cap_key)
-            if not cap or now() - cap["at"] > 3600 or cap.get("endpoint") != endpoint:
+            retry = self.store.get("history_retry:" + c.name, {})
+            if retry.get("until", 0) > now():
+                write(self.store, CoverageGap, key, {"reason": retry["reason"], "at": now()})
+                continue
+            if (
+                not cap
+                or now() - cap["at"] > cap.get("retry_after", 3600)
+                or cap.get("endpoint") != endpoint
+                or cap.get("reader_version") != 2
+            ):
                 cap = await probe(rpc, wallet, now())
                 cap["endpoint"] = endpoint
+                cap["reader_version"] = 2
                 self.store.put(cap_key, cap)
             self.health("history:" + c.name, cap)
             if not cap["ready"]:
@@ -371,6 +399,11 @@ class History:
                     await self.solana_step(rpc, trader, wallet, key)
             except Exception as exc:
                 write(self.store, CoverageGap, key, {"reason": failure(exc), "at": now()})
+                if isinstance(exc, RPCBackoff):
+                    self.store.put(
+                        "history_retry:" + c.name,
+                        {"until": now() + exc.seconds, "reason": failure(exc)},
+                    )
         return self.evaluate(trader)
 
     async def evm_step(self, rpc, trader, wallet, key, cap):
@@ -521,45 +554,53 @@ class History:
                 "accounts": [wallet],
             },
         )
-        params = {"limit": 100, "commitment": "finalized"}
+        # Persist each completed signature. A timeout halfway through a page
+        # must resume at the failed transaction instead of replaying the page.
+        if state.get("exhausted"):
+            return
+        write(self.store, ScanCheckpoint, key, state)
+        params = {"limit": 20, "commitment": "finalized"}
         if state["before"]:
             params["before"] = state["before"]
         page = await rpc.call("getSignaturesForAddress", [wallet, params])
-        if page and page[-1]["signature"] == state["before"]:
+        if page and (
+            page[-1]["signature"] == state["before"]
+            or len({r["signature"] for r in page}) != len(page)
+        ):
             raise Unavailable("repeated Solana signature page")
         for row in page:
-            if row.get("err"):
-                continue
-            tx = await rpc.call(
-                "getTransaction",
-                [
-                    row["signature"],
-                    {
-                        "encoding": "jsonParsed",
-                        "commitment": "finalized",
-                        "maxSupportedTransactionVersion": 0,
-                    },
-                ],
-            )
-            if not tx or tx.get("blockTime") is None:
-                raise Unavailable("finalized Solana transaction or timestamp unavailable")
-            for movement in solana_movements(
-                tx, trader["userId"], wallet, row["signature"], rpc.chain, float("inf")
-            ):
-                await self.persist(movement)
-            state["start"] = min(state["start"], tx["blockTime"])
-        if page:
-            state["before"] = page[-1]["signature"]
-            state["transactions"] += len(page)
-        write(self.store, ScanCheckpoint, key, state)
-        # Standard owner RPC cannot enumerate already-closed token accounts. An
-        # empty wallet-signature page is not proof of their full transfer history.
+            if not row.get("err"):
+                tx = await rpc.call(
+                    "getTransaction",
+                    [
+                        row["signature"],
+                        {
+                            "encoding": "jsonParsed",
+                            "commitment": "finalized",
+                            "maxSupportedTransactionVersion": SOLANA_READ_VERSION,
+                        },
+                    ],
+                )
+                if not tx or tx.get("blockTime") is None:
+                    raise Unavailable("finalized Solana transaction or timestamp unavailable")
+                for movement in solana_movements(
+                    tx, trader["userId"], wallet, row["signature"], rpc.chain, float("inf")
+                ):
+                    await self.persist(movement)
+                state["start"] = min(state["start"], tx["blockTime"])
+            state["before"] = row["signature"]
+            state["transactions"] += 1
+            write(self.store, ScanCheckpoint, key, state)
+        if not page:
+            state["exhausted"] = True
+            write(self.store, ScanCheckpoint, key, state)
         write(
             self.store,
             CoverageGap,
             key,
             {
                 "at": now(),
-                "reason": "Solana closed token-account enumeration and historical inventory reconciliation unavailable",
+                "reason": "Solana full-history coverage unavailable: closed token-account "
+                "enumeration and inventory reconciliation not implemented",
             },
         )
