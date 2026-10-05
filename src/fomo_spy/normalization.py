@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from eth_utils import keccak
 
 from .domain import D, Signal
+from .providers import Unavailable
 
 TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 WSOL = "So11111111111111111111111111111111111111112"
@@ -90,7 +91,9 @@ def classify(deltas, chain, native=None):
     return result
 
 
-async def evm_movements(rpc, receipt, block, trader, wallet, logs, started, trace=None):
+async def evm_movements(
+    rpc, receipt, block, trader, wallet, logs, started, trace=None, *, gaps=None
+):
     c = rpc.chain
     if receipt["blockHash"] != block["hash"]:
         raise ValueError("noncanonical receipt")
@@ -130,8 +133,25 @@ async def evm_movements(rpc, receipt, block, trader, wallet, logs, started, trac
     height = int(receipt["blockNumber"], 16)
     result = []
     for token, delta, side, amount, asset in classify(deltas, c, native):
-        decimals = await rpc.decimals(token, hex(height))
-        before = await rpc.balance(token, wallet, hex(max(0, height - 1)))
+        try:
+            decimals = await rpc.decimals(token, hex(height))
+            if not 0 <= decimals <= 18:
+                raise Unavailable("unsupported token precision")
+            before = await rpc.balance(token, wallet, hex(max(0, height - 1)))
+        except Exception as exc:
+            if (
+                gaps is None
+                or not isinstance(exc, (Unavailable, ValueError))
+                or "rate limited" in str(exc)
+            ):
+                raise
+            gaps.append(
+                {
+                    "token": token,
+                    "reason": str(exc) if isinstance(exc, Unavailable) else type(exc).__name__,
+                }
+            )
+            continue
         for log in logs:
             if (
                 int(log["blockNumber"], 16) == height

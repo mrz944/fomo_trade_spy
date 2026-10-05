@@ -67,7 +67,7 @@ def test_initial_migration_is_versioned_and_idempotent(cfg):
         with store.engine.connect() as connection:
             assert (
                 connection.execute(text("select version_num from alembic_version")).scalar()
-                == "0003"
+                == "0004"
             )
             assert {"events", "orders", "positions", "cash", "ledger", "kv"}.issubset(
                 inspect(connection).get_table_names()

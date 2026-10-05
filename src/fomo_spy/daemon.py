@@ -10,6 +10,7 @@ import httpx
 
 from .activity import observe
 from .config import Settings
+from .current import probe_current
 from .db import Store
 from .demo import DemoQuotes, seed
 from .domain import D, Fill, Signal, now
@@ -20,6 +21,7 @@ from .ipc import Control
 from .providers import Fomo, Relay, scrape_public_fomo
 from .ranking import rank
 from .rpc import Monitor
+from .selection import valid_wallet
 
 
 class Daemon:
@@ -62,7 +64,7 @@ class Daemon:
 
     def wallets(self, chain):
         result = {}
-        for trader in self.engine.watched():
+        for trader in self.engine.watched(chain.name):
             row = self.store.get("trader:" + trader, {})
             wallet = row.get("wallets", {}).get("solana" if chain.kind == "solana" else "evm")
             if wallet:
@@ -82,19 +84,32 @@ class Daemon:
             await self.stop.wait()
             return
         while not self.stop.is_set():
-            retry_after = self.cfg.discovery_ttl
+            retry_after = self.cfg.discovery_cache_seconds
             try:
                 traders = await self.fomo.discover()
+                received_at = self.fomo.discovery_received_at
+                expires = received_at + self.cfg.discovery_cache_seconds
+                retry_after = max(1, expires - now())
                 # Retain leaderboard order and candidates even if history calls
                 # subsequently hit the monitoring credit reserve.
                 for trader in traders:
                     if trader.get("userId"):
                         self.store.put("trader:" + trader["userId"], trader)
+                self.store.put(
+                    "current_leaderboard",
+                    {
+                        "at": received_at,
+                        "expires": expires,
+                        "traders": [t["userId"] for t in traders if t.get("userId")],
+                    },
+                )
                 for trader in traders:
                     uid = trader.get("userId")
                     if not uid:
                         continue
                     self.store.put("trader:" + uid, trader)
+                    if not self.cfg.backfill_enabled:
+                        continue
                     history = await self.fomo.history(uid)
                     self.store.put("history_raw:" + uid, history)
                     self.history.evaluate(trader)
@@ -180,6 +195,14 @@ class Daemon:
             reason=reason,
         ):
             return
+        if chain and ts is not None and now() - 3600 <= ts <= now() + 2:
+            old = self.store.get(f"research_activity:{uid}:{chain}", {})
+            if ts > old.get("at", 0):
+                self.store.put(
+                    f"research_activity:{uid}:{chain}",
+                    {"at": ts, "source": "FOMO activity hint", "token": data.get("tokenAddress")},
+                )
+        self.monitor.wake(chain)
         self.engine.health(
             "social:" + uid if watched else "social_feed",
             {
@@ -211,6 +234,52 @@ class Daemon:
                 await asyncio.sleep(0)
             try:
                 await asyncio.wait_for(self.stop.wait(), timeout=self.cfg.history_refresh_seconds)
+            except TimeoutError:
+                pass
+
+    async def research(self):
+        while not self.stop.is_set():
+            try:
+                board = self.store.get("current_leaderboard", {})
+                traders = [self.store.get("trader:" + uid, {}) for uid in board.get("traders", [])]
+                catalog = None
+                for chain in self.cfg.chains:
+                    if not chain.enabled:
+                        continue
+                    old = self.store.get("current_capability:" + chain.name, {})
+                    if now() - old.get("at", 0) < (3600 if old.get("observe_ready") else 300):
+                        continue
+                    wallet = next(
+                        (
+                            t.get("wallets", {}).get("solana" if chain.kind == "solana" else "evm")
+                            for t in traders
+                            if valid_wallet(
+                                t.get("wallets", {}).get(
+                                    "solana" if chain.kind == "solana" else "evm"
+                                ),
+                                chain.kind,
+                            )
+                        ),
+                        None,
+                    )
+                    if not wallet:
+                        continue
+                    if catalog is None:
+                        catalog = await self.quotes.catalog()
+                    report = await probe_current(chain, wallet, self.http, self.quotes, catalog)
+                    self.store.put("current_capability:" + chain.name, report)
+                    self.engine.health("current:" + chain.name, report)
+                    # Admit working chains without waiting for slower chain probes.
+                    self.engine.research.refresh()
+                checked = self.store.get("research_selection_checked", {}).get("at", 0)
+                if now() - checked >= self.cfg.research_selection_interval:
+                    self.engine.research.refresh()
+            except Exception as exc:
+                self.engine.health(
+                    "research", {"state": "blocked", "error": type(exc).__name__, "at": now()}
+                )
+            try:
+                await asyncio.wait_for(self.stop.wait(), 5)
             except TimeoutError:
                 pass
 
@@ -277,12 +346,15 @@ class Daemon:
             tasks.extend(
                 [
                     asyncio.create_task(self.discovery()),
-                    asyncio.create_task(self.reconstruct()),
                     asyncio.create_task(
                         self.fomo.stream(self.social, self.engine.health, self.stop)
                     ),
                 ]
             )
+            if self.cfg.backfill_enabled:
+                tasks.append(asyncio.create_task(self.reconstruct()))
+            if self.cfg.selection_policy == "paper_research":
+                tasks.append(asyncio.create_task(self.research()))
             for chain in self.cfg.chains:
                 if chain.enabled:
                     tasks.append(asyncio.create_task(self.supervise_chain(chain)))

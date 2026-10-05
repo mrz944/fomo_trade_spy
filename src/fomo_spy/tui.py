@@ -45,7 +45,7 @@ class SpyApp(App):
     TITLE = "FOMO Trade Spy"
     SUB_TITLE = "daemon client"
     CSS = """
-    #summary { height: 4; padding: 0 1; background: $boost; }
+    #summary { height: 5; padding: 0 1; background: $boost; }
     #message { height: 2; padding: 0 1; }
     DataTable { height: 1fr; }
     Input { dock: bottom; }
@@ -68,6 +68,7 @@ class SpyApp(App):
         yield Static("Connecting to daemon…", id="summary")
         with TabbedContent():
             for name, title in [
+                ("research", "Research selections"),
                 ("rankings", "Rankings & evidence"),
                 ("activity", "Activity"),
                 ("positions", "Positions"),
@@ -86,6 +87,7 @@ class SpyApp(App):
 
     async def on_mount(self):
         columns = {
+            "research": ["Trader", "Selected", "Chains", "Provider PnL $", "Basis"],
             "rankings": [
                 "Trader",
                 "Selected",
@@ -117,6 +119,11 @@ class SpyApp(App):
             self.query_one("#" + name, DataTable).add_columns(*cols)
         self.set_interval(2, self.refresh_status)
         await self.refresh_status()
+        self.query_one(TabbedContent).active = (
+            "tab-research"
+            if self.last_snapshot.get("selection_policy") == "paper_research"
+            else "tab-rankings"
+        )
 
     def table(self, name, rows):
         table = self.query_one("#" + name, DataTable)
@@ -132,12 +139,34 @@ class SpyApp(App):
                 s = await request(self.socket, {"command": "status"})
                 self.last_snapshot = s
                 self.query_one("#summary", Static).update(
-                    f"{s['mode'].upper()}  |  Equity ${s['equity_usd']}  |  "
+                    (
+                        "PAPER RESEARCH — historical profitability unverified\n"
+                        if s.get("selection_policy") == "paper_research"
+                        else ""
+                    )
+                    + f"{s['mode'].upper()}  |  Equity ${s['equity_usd']}  |  "
                     f"Entries {'PAUSED' if s['paused'] else 'enabled'}  |  "
                     f"Selected {len(s['selected'])} / Watching {len(s['watching'])}\n"
                     f"Workflow: {s.get('workflow', {}).get('state', 'unknown')} | "
                     f"Evaluated: {s.get('workflow', {}).get('evaluated', 0)}\n"
                     f"{'; '.join(s.get('workflow', {}).get('blockers', [])[:1]) or 'Awaiting fresh source activity'}"
+                )
+                self.table(
+                    "research",
+                    [
+                        [
+                            r.get("handle", r.get("trader", "")),
+                            r.get("trader") in s["selected"],
+                            ", ".join(
+                                p["chain"]
+                                for p in s.get("selected_pairs", [])
+                                if p["trader"] == r.get("trader")
+                            ),
+                            r.get("reported_pnl_usd", "unknown"),
+                            r.get("reason", ""),
+                        ]
+                        for r in s.get("research_selections", [])
+                    ],
                 )
                 self.table(
                     "rankings",
@@ -206,6 +235,7 @@ class SpyApp(App):
                         ["Latency", json.dumps(s["latency"])],
                         ["Credits", json.dumps(s.get("credits", {}))],
                         ["Chain cash", json.dumps(s["cash"])],
+                        ["Paper accounting by policy", json.dumps(s.get("policy_performance", {}))],
                         ["Workflow / coverage", json.dumps(s.get("workflow", {}))],
                     ],
                 )

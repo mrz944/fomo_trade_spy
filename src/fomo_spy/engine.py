@@ -11,12 +11,14 @@ from .config import Settings
 from .db import KV, Cash, Event, Ledger, Order, Position, Store
 from .domain import D, Quote, Signal, now
 from .providers import Unavailable
+from .selection import ResearchPolicy
 
 
 class Engine:
     def __init__(self, cfg: Settings, store: Store, quotes, live=None, rpc_http=None):
         self.cfg, self.store, self.quotes, self.live = cfg, store, quotes, live
         self.rpc_http = rpc_http
+        self.research = ResearchPolicy(cfg, store)
         self.lock = asyncio.Lock()
         self.started = now()
         enabled = [c for c in cfg.chains if c.enabled]
@@ -55,6 +57,8 @@ class Engine:
         )
 
     def selected(self):
+        if self.cfg.selection_policy == "paper_research":
+            return sorted({pair["trader"] for pair in self.research.pairs()})
         return [
             r["trader"]
             for r in self.rankings()
@@ -70,10 +74,31 @@ class Engine:
             )
         ][: self.cfg.follow]
 
-    def watched(self):
+    def entry_allowed(self, sig):
+        if self.cfg.selection_policy == "verified":
+            return sig.trader in self.selected()
+        ready = self.store.get(f"monitor_ready:{sig.chain}:{sig.trader}", {})
+        return (
+            self.research.allows(sig)
+            and ready.get("ready", False)
+            and ready.get("at", 0) > now() - 120
+            and sig.block > ready.get("anchor", -1)
+        )
+
+    def watched(self, chain=None):
         with self.store.session() as s:
             positions = s.scalars(select(Position).where(Position.mode == self.cfg.mode)).all()
-            return sorted(set(self.selected()) | {p.trader for p in positions if D(p.quantity) > 0})
+            exits = {
+                p.trader
+                for p in positions
+                if D(p.quantity) > 0 and (chain is None or p.chain == chain)
+            }
+        entries = (
+            set(self.selected())
+            if chain is None or self.cfg.selection_policy == "verified"
+            else {p["trader"] for p in self.research.pairs() if p["chain"] == chain}
+        )
+        return sorted(exits) + sorted(entries - exits)
 
     def position_id(self, trader, chain, token):
         return hashlib.sha256("|".join([self.cfg.mode, trader, chain, token]).encode()).hexdigest()[
@@ -175,7 +200,10 @@ class Engine:
                 s.add(
                     Event(
                         key=sig.key,
-                        data=sig.model_dump(mode="json"),
+                        data={
+                            **sig.model_dump(mode="json"),
+                            "selection_policy": self.cfg.selection_policy,
+                        },
                         status="received",
                         reason="",
                         received=sig.received,
@@ -204,8 +232,14 @@ class Engine:
                 reason = "entry older than 30 seconds"
             elif not self.cfg.chain(sig.chain).enabled:
                 reason = "chain disabled"
-            elif sig.side == "buy" and sig.trader not in self.selected():
-                reason = "trader not selected"
+            elif sig.side == "buy" and not self.entry_allowed(sig):
+                reason = "trader not selected or monitoring baseline not ready"
+            elif (
+                sig.side == "buy"
+                and self.cfg.selection_policy == "paper_research"
+                and (sig.source_before is None or sig.source_after is None)
+            ):
+                reason = "unknown source inventory; research entry blocked"
             pid = self.position_id(sig.trader, sig.chain, sig.token)
             if reason:
                 with self.store.session() as s:
@@ -245,6 +279,8 @@ class Engine:
                 else:
                     amount = int(self.cfg.limits.buy_usd * 10 ** self.cfg.chain(sig.chain).decimals)
                     reason = self.risk_reason(s, sig.chain, self.cfg.limits.buy_usd)
+                    if p and D(p.quantity) > 0 and p.selection_policy != self.cfg.selection_policy:
+                        reason = "open lot belongs to a different selection policy"
                 if reason:
                     e = s.get(Event, sig.key)
                     e.status, e.reason = "rejected", reason
@@ -346,11 +382,28 @@ class Engine:
                 sig.chain, sig.token, sig.side, amount, sig.token_decimals
             )
             self.validate_quote(quote, sig, amount)
-            if sig.side == "buy" and sig.trader not in self.selected():
+            self.health(
+                "quote:" + sig.chain,
+                {"state": "quoting", "token": sig.token, "side": sig.side, "at": now()},
+            )
+            if sig.side == "buy" and self.cfg.selection_policy == "paper_research":
+                output = quote.minimum_output * (10000 - self.cfg.limits.adverse_bps) // 10000
+                liquidation = await self.quotes.quote(
+                    sig.chain, sig.token, "sell", output, sig.token_decimals
+                )
+                self.validate_quote(liquidation, sig.model_copy(update={"side": "sell"}), output)
+                self.validate_quote(quote, sig, amount)
+            if sig.side == "buy" and not self.entry_allowed(sig):
                 raise Unavailable("trader deselected while obtaining quote")
             if sig.side == "buy" and not manual and now() - sig.timestamp > self.cfg.max_signal_age:
                 raise Unavailable("signal expired while obtaining quote")
             with self.store.session() as s:
+                existing_position = s.get(Position, pid)
+                policy = (
+                    existing_position.selection_policy
+                    if sig.side == "sell" and existing_position
+                    else self.cfg.selection_policy
+                )
                 if sig.side == "buy":
                     reason = self.risk_reason(s, sig.chain, quote.usd + quote.fee_usd)
                     if reason:
@@ -371,6 +424,7 @@ class Engine:
                             "decimals": sig.token_decimals,
                             "signal_at": sig.timestamp,
                             "manual": manual,
+                            "selection_policy": policy,
                             "reserve": str(quote.usd + quote.fee_usd) if sig.side == "buy" else "0",
                             "quote": quote.model_dump(mode="json"),
                         },
@@ -400,10 +454,25 @@ class Engine:
                     "chain_to_decision_ms": round((now() - sig.timestamp) * 1000),
                 },
             )
+            self.health(
+                "quote:" + sig.chain,
+                {
+                    "state": "paper execution observed"
+                    if self.cfg.mode == "paper"
+                    else "submitted",
+                    "token": sig.token,
+                    "side": sig.side,
+                    "at": now(),
+                },
+            )
             return "processed"
         except Exception as exc:
             # Do not destroy uncertain state if broadcast may have occurred.
             message = str(exc) if isinstance(exc, Unavailable) else type(exc).__name__
+            self.health(
+                "quote:" + sig.chain,
+                {"state": "blocked", "reason": message, "token": sig.token, "at": now()},
+            )
             with self.store.session() as s:
                 o = s.get(Order, order_id)
                 if o and o.state == "prepared":
@@ -461,10 +530,17 @@ class Engine:
                     mark="0",
                     marked_at=0,
                     needs_reconcile=False,
+                    selection_policy=o.data.get("selection_policy", "verified"),
                 )
                 s.add(p)
             cash = s.get(Cash, o.mode + ":" + q.chain)
             if o.side == "buy":
+                policy = o.data.get("selection_policy", "verified")
+                if D(p.quantity) > 0 and p.selection_policy != policy:
+                    raise Unavailable("cannot mix selection policies in an open lot")
+                if p.selection_policy != policy:
+                    p.realized = "0"  # Prior policy results remain in immutable ledger rows.
+                p.selection_policy = policy
                 quantity = D(output) / 10**q.token_decimals
                 cost = q.usd + fee
                 cash.balance = str(D(cash.balance) - cost)
@@ -504,6 +580,7 @@ class Engine:
                         "side": o.side,
                         "position": p.id,
                         "provider": q.provider,
+                        "selection_policy": o.data.get("selection_policy", "verified"),
                     },
                 )
             )
@@ -805,6 +882,33 @@ class Engine:
                 c.id.split(":", 1)[1]: c.balance
                 for c in s.scalars(select(Cash).where(Cash.id.startswith(self.cfg.mode + ":")))
             }
+            performance = {}
+            for row in s.scalars(select(Ledger).where(Ledger.mode == self.cfg.mode)):
+                policy = row.details.get("selection_policy", "verified")
+                totals = performance.setdefault(
+                    policy,
+                    {
+                        "realized_usd": D(0),
+                        "fees_usd": D(0),
+                        "open_cost_usd": D(0),
+                        "open_mark_usd": D(0),
+                    },
+                )
+                totals["realized_usd"] += D(row.realized)
+                totals["fees_usd"] += D(row.details.get("fee_usd", "0"))
+            for position in positions:
+                if D(position.quantity) > 0:
+                    totals = performance.setdefault(
+                        position.selection_policy,
+                        {
+                            "realized_usd": D(0),
+                            "fees_usd": D(0),
+                            "open_cost_usd": D(0),
+                            "open_mark_usd": D(0),
+                        },
+                    )
+                    totals["open_cost_usd"] += D(position.cost)
+                    totals["open_mark_usd"] += D(position.mark)
         latency = sorted(self.store.items("latency:").values(), key=lambda x: x["at"])[-1000:]
         lags = sorted(x["chain_to_receive_ms"] for x in latency)
         by_chain = {}
@@ -822,6 +926,17 @@ class Engine:
         return {
             "workflow": self.workflow(events, orders),
             "mode": self.cfg.mode,
+            "selection_policy": self.cfg.selection_policy,
+            "policy_performance": {
+                policy: {k: str(v) for k, v in totals.items()}
+                for policy, totals in performance.items()
+            },
+            "research_selections": list(self.research.records().values())
+            if self.cfg.selection_policy == "paper_research"
+            else [],
+            "selected_pairs": self.research.pairs()
+            if self.cfg.selection_policy == "paper_research"
+            else [],
             "at": now(),
             "uptime": now() - self.started,
             "paused": self.store.get("paused:" + self.cfg.mode, False),
@@ -844,13 +959,20 @@ class Engine:
                         "mark",
                         "marked_at",
                         "needs_reconcile",
+                        "selection_policy",
                     )
                 }
                 for p in positions
                 if D(p.quantity) > 0
             ],
             "orders": [
-                {k: getattr(o, k) for k in ("id", "side", "state", "created", "tx_hash", "error")}
+                {
+                    **{
+                        k: getattr(o, k)
+                        for k in ("id", "side", "state", "created", "tx_hash", "error")
+                    },
+                    "selection_policy": o.data.get("selection_policy", "verified"),
+                }
                 for o in orders
             ],
             "activity": timeline(self.store, events),
@@ -915,11 +1037,92 @@ class Engine:
             state = "traders selected; awaiting observed execution"
         if selected and observed and self.store.get("environment") == "real":
             state = "paper execution observed"
+        history_blockers = blockers
+        pairs, entry_ready, exit_watched = [], 0, 0
+        if self.cfg.selection_policy == "paper_research":
+            capabilities = self.store.items("current_capability:")
+            pairs = self.research.pairs()
+            entry_ready = sum(
+                self.store.get(f"monitor_ready:{p['chain']}:{p['trader']}", {}).get("ready", False)
+                and self.store.get(f"monitor_ready:{p['chain']}:{p['trader']}", {}).get("at", 0)
+                >= now() - 120
+                for p in pairs
+            )
+            blockers = [
+                f"{c.name}: "
+                + self.store.get("current_capability:" + c.name, {}).get(
+                    "reason", "current-data probe pending"
+                )
+                for c in self.cfg.chains
+                if c.enabled
+                and (
+                    not self.store.get("current_capability:" + c.name, {}).get("observe_ready")
+                    or self.store.get("current_capability:" + c.name, {}).get("at", 0)
+                    < now() - 7200
+                )
+            ]
+            blockers.extend(
+                f"{p['chain']}:{p['trader']}: "
+                + (r.get("reason") or "monitor baseline pending or stale")
+                for p in pairs
+                for r in [self.store.get(f"monitor_ready:{p['chain']}:{p['trader']}", {})]
+                if not r.get("ready") or r.get("at", 0) < now() - 120
+            )
+            if self.store.get("paused:" + self.cfg.mode, False):
+                blockers.append("entries paused by operator")
+            blockers.extend(
+                c.name + ": chain reconciliation required"
+                for c in self.cfg.chains
+                if self.store.get("chain_halt:" + c.name, False)
+            )
+            with self.store.session() as session:
+                paper_positions = list(
+                    session.scalars(select(Position).where(Position.mode == self.cfg.mode))
+                )
+                exit_watched = len(
+                    {(p.trader, p.chain) for p in paper_positions if D(p.quantity) > 0}
+                )
+                reconciliation = any(
+                    p.needs_reconcile and D(p.quantity) > 0 for p in paper_positions
+                )
+                # Lifetime count survives the bounded Activity/order display window.
+                observed = list(
+                    session.scalars(
+                        select(Order)
+                        .join(Event, Order.event_key == Event.key)
+                        .where(
+                            Order.mode == "paper",
+                            Order.state == "filled",
+                            Event.data["provider"].as_string() == "rpc",
+                            Event.data["historical"].as_boolean().is_(False),
+                            Event.data["finalized"].as_boolean().is_(True),
+                        )
+                    )
+                )
+            state = (
+                "awaiting fresh transactions"
+                if entry_ready
+                else "observing"
+                if selected
+                else "blocked"
+            )
+            if observed and self.store.get("environment") == "real" and entry_ready:
+                state = "paper execution observed"
+            if reconciliation:
+                state = "reconciliation required"
         return {
             "daemon": "healthy",
             "state": state,
             "blockers": blockers,
-            "candidates": len(ranks),
+            "candidates": len(self.store.get("current_leaderboard", {}).get("traders", []))
+            if self.cfg.selection_policy == "paper_research"
+            else len(ranks),
+            "selection_policy": self.cfg.selection_policy,
+            "selected_pairs": pairs,
+            "entry_ready": entry_ready,
+            "exit_watched": exit_watched,
+            "historical_blockers": history_blockers,
+            "history_backfill_enabled": self.cfg.backfill_enabled,
             "evaluated": evaluated,
             "selected": len(selected),
             "watched": len(self.watched()),

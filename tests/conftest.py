@@ -11,6 +11,7 @@ from fomo_spy.engine import Engine
 def cfg(tmp_path):
     chain = next(c for c in default_chains() if c.name == "base")
     chain.historical_rpc_interval = 0
+    chain.rpc_requests_per_second = 100
     return Settings(state_dir=tmp_path / "private", chains=[chain])
 
 

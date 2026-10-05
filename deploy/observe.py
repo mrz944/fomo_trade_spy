@@ -40,6 +40,17 @@ def accounting(database):
             "orders": dict(
                 db.execute("SELECT state,count(*) FROM orders WHERE mode='paper' GROUP BY state")
             ),
+            "filled_sides": dict(
+                db.execute(
+                    "SELECT side,count(*) FROM orders WHERE mode='paper' AND state='filled' GROUP BY side"
+                )
+            ),
+            "policy_ledger_rows": dict(
+                db.execute(
+                    "SELECT coalesce(json_extract(details,'$.selection_policy'),'verified'),count(*) "
+                    "FROM ledger WHERE mode='paper' GROUP BY 1"
+                )
+            ),
             "reconciliation_flags": db.execute(
                 "SELECT count(*) FROM positions WHERE needs_reconcile=1"
             ).fetchone()[0],
@@ -102,6 +113,9 @@ def main():
                         "credits",
                         "selected",
                         "watching",
+                        "selection_policy",
+                        "policy_performance",
+                        "selected_pairs",
                     )
                 }
             )

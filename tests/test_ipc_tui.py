@@ -143,3 +143,26 @@ async def test_tui_renders_observation_when_no_traders_selected(engine, server):
         await pilot.pause()
         assert app.query_one("#activity", DataTable).row_count >= 1
         assert any(r["kind"] == "FOMO alert" for r in app.last_snapshot["activity"])
+
+
+async def test_tui_labels_research_separately_from_verified_profitability(engine, server):
+    from textual.widgets import DataTable, Static
+
+    from fomo_spy.domain import now
+
+    engine.cfg.selection_policy = "paper_research"
+    engine.store.put("current_leaderboard", {"traders": ["u"], "expires": now() + 1000})
+    engine.store.put(
+        "trader:u", {"userId": "u", "pnlUsd": 100, "wallets": {"evm": "0x" + "1" * 40}}
+    )
+    engine.store.put("current_capability:base", {"at": now(), "observe_ready": True})
+    engine.research.refresh()
+    app = SpyApp(server[0])
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        assert app.query_one("#research", DataTable).row_count == 1
+        assert "historical profitability unverified" in str(
+            app.query_one("#summary", Static).render()
+        )
+        assert app.last_snapshot["workflow"]["entry_ready"] == 0
+        assert app.last_snapshot["workflow"]["blockers"]

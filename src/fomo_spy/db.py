@@ -49,6 +49,9 @@ class Position(Base):
     mark: Mapped[str] = mapped_column(String, default="0")
     marked_at: Mapped[float] = mapped_column(Float, default=0)
     needs_reconcile: Mapped[bool] = mapped_column(default=False)
+    selection_policy: Mapped[str] = mapped_column(
+        String, default="verified", server_default="verified"
+    )
 
 
 class Order(Base):
@@ -117,6 +120,18 @@ class ProviderSwap(Base):
     data: Mapped[dict] = mapped_column(JSON)
 
 
+class ResearchSelection(Base):
+    __tablename__ = "research_selections"
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    data: Mapped[dict] = mapped_column(JSON)
+
+
+class MonitorState(Base):
+    __tablename__ = "monitor_states"
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    data: Mapped[dict] = mapped_column(JSON)
+
+
 class Store:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -148,7 +163,10 @@ class Store:
                     actual = {
                         column["name"] for column in inspect(connection).get_columns(table.name)
                     }
-                    if actual != set(table.columns.keys()):
+                    expected_columns = set(table.columns.keys()) - (
+                        {"selection_policy"} if table.name == "positions" else set()
+                    )
+                    if actual != expected_columns:
                         raise ValueError("unversioned database columns are not recognized")
                 command.stamp(config, "0001")
             command.upgrade(config, "head")

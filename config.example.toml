@@ -1,5 +1,11 @@
 # Copy to ignored config.toml; chmod 600 config.toml.
 mode = "paper"
+# Explicit opt-in: "paper_research" uses provisional leaderboard selection.
+# "verified" retains the original complete-history profitability requirements.
+selection_policy = "verified"
+# Research defaults to no historical backfill; existing evidence is retained.
+# historical_backfill = false
+# research_discovery_ttl = 21600
 state_dir = "state/real"
 # socket = "/run/user/1000/fomo-spy/daemon.sock"
 # fomo_key_file = "/absolute/path/to/0600-fomo-key"
@@ -45,6 +51,7 @@ max_fee_usd = "5"
 # decimals = 6
 # enabled = true
 # confirmations = 2
+# rpc_requests_per_second = 2.0
 # wallet = "YOUR_DEDICATED_PUBLIC_WALLET"
 # secret_file = "/run/secrets/base_wallet"
 # router = "REVIEWED_V2_ROUTER_ADDRESS"

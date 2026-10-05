@@ -20,6 +20,7 @@ async def preflight(cfg: Settings, network=False, quotes=False):
     report = {
         "at": now(),
         "mode": cfg.mode,
+        "selection_policy": cfg.selection_policy,
         "network_checks": network,
         "funded_transactions_submitted": 0,
         "infrastructure": {

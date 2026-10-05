@@ -69,6 +69,8 @@ class Control:
             else:
                 excluded.discard(trader)
             e.store.put("excluded", sorted(excluded))
+            if e.cfg.selection_policy == "paper_research":
+                e.research.refresh()
             return {"excluded": sorted(excluded), "watching": e.watched()}
         if cmd == "reconcile":
             return await e.reconcile_inventory(req.get("position", ""))

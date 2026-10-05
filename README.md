@@ -4,7 +4,14 @@ A separate Python 3.12 daemon, Textual terminal client, evidence-ranking engine,
 and paper/live copy-trading implementation. This repository does not use or modify
 `solana_spy_trader`.
 
-**Status: paper workflow implementation tested; seven-chain production acceptance is blocked.**
+**Two selection policies: verified evidence (default), and opt-in paper research.**
+Paper research monitors up to five current FOMO leaderboard candidates on capable
+chains, prioritizing recent activity. It does not certify their profitability.
+Both policies use canonical transactions, executable quotes and the same accounting
+and risk limits. Fresh production execution and a completed observation window must
+be recorded separately from regression-test success.
+
+The verified policy still requires complete 30-day history:
 Discovery now parses authenticated cached swaps, and a durable chain-evidence worker
 replaces the empty-history placeholder. EVM reconstruction is resumable, extends
 backwards for opening inventory, and requires historical balances, receipts, logs,
@@ -13,9 +20,9 @@ are persisted. No provider flag or imported coverage assertion can qualify a tra
 
 The seven configured free endpoints did not establish the required capabilities in
 the 2026-09-27 probes. Solana closed-token-account indexing/reconciliation and some
-chain-specific native fee models remain unfinished. Missing evidence is displayed
+chain-specific native fee models remain unfinished for historical qualification. Missing evidence is displayed
 as data unavailable, separately from an evaluated trader failing the original
-profitability rules. No fresh real-source paper fill has yet been observed.
+profitability rules.
 See [workflow evidence and blockers](docs/history-workflow.md).
 
 ## Run locally
@@ -76,6 +83,33 @@ pools. Each source with copied inventory remains watched after deselection or
 exclusion. The seven-day cache TTL is unrelated to eligibility. Complete reconstructed
 30-day evidence can qualify automatically; history never generates copy signals. See
 [history format](docs/history-format.md).
+
+To opt into the paper research policy, set these **top-level** configuration fields:
+
+```toml
+mode = "paper"
+selection_policy = "paper_research"
+historical_backfill = false
+```
+
+Research selection uses the current top-50 leaderboard with positive provider-reported
+PnL, valid wallets and working current RPC capabilities. That reported PnL is explicitly
+unverified. The leaderboard expires after six hours, including across restarts. Recent
+activity takes priority after a 30-minute minimum selection dwell; selection is refreshed
+every five minutes. At most five distinct traders are selected across all seven chains.
+Each selected wallet starts with a fresh monitoring baseline. No baseline/reconnect
+transaction can create a replayed entry. Open lots continue to receive exit monitoring
+after rotation, exclusion or pause. Buy and liquidation routes must both quote before
+each research entry. Every order, lot and ledger entry records its selection policy;
+performance is reported separately. Research policy is rejected in live mode.
+
+Current Solana monitoring reconciles SPL Token and Token-2022 account snapshots,
+discovers accounts touched or closed during the interval, and computes sale fractions
+from all owned accounts of the mint. A mismatch or unavailable transaction blocks the
+affected inventory rather than inventing a balance. This current inventory mechanism
+does not establish complete historical coverage. Unsupported assets/routes remain
+visible failures. RPC traffic shares bounded endpoint budgets, with exits ahead of
+discovery/history; HTTP 429 cooldowns apply to every worker using that endpoint.
 
 Default eligibility requires 20 complete inventory cycles, five tokens, three
 closing/trading days, positive fee-adjusted returns, positive profit without the

@@ -21,6 +21,7 @@ class Chain(Strict):
     rpc: str
     historical_rpc: str | None = None
     historical_rpc_interval: float = Field(0.6, ge=0, le=10)
+    rpc_requests_per_second: float = Field(2, gt=0, le=100)
     ws: str = ""
     settlement: str
     decimals: int = Field(6, ge=0, le=18)
@@ -129,6 +130,11 @@ class Limits(Strict):
 
 class Settings(Strict):
     mode: Literal["paper", "live"] = "paper"
+    selection_policy: Literal["verified", "paper_research"] = "verified"
+    historical_backfill: bool | None = None
+    research_discovery_ttl: int = Field(21600, ge=300)
+    research_selection_interval: int = Field(300, ge=30)
+    research_min_dwell: int = Field(1800, ge=0)
     state_dir: Path = Path("state")
     socket: Path | None = None
     chains: list[Chain] = Field(default_factory=default_chains)
@@ -164,6 +170,8 @@ class Settings(Strict):
         if len({c.name for c in self.chains}) != len(self.chains):
             raise ValueError("duplicate chain names")
         if self.mode == "live":
+            if self.selection_policy != "verified":
+                raise ValueError("paper_research selection cannot authorize live trading")
             if self.auto_bridge:
                 raise ValueError(
                     "automatic live bridging requires a bridge transaction decoder; unavailable"
@@ -183,6 +191,22 @@ class Settings(Strict):
     @property
     def limits(self):
         return self.live if self.mode == "live" else self.paper
+
+    @property
+    def backfill_enabled(self):
+        return (
+            self.historical_backfill
+            if self.historical_backfill is not None
+            else self.selection_policy == "verified"
+        )
+
+    @property
+    def discovery_cache_seconds(self):
+        return (
+            self.research_discovery_ttl
+            if self.selection_policy == "paper_research"
+            else self.discovery_ttl
+        )
 
     @property
     def socket_path(self) -> Path:

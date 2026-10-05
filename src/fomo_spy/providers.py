@@ -102,11 +102,19 @@ class Fomo:
         return data
 
     async def discover(self):
+        path, params = "/v2/leaderboard/30d", {"limit": self.cfg.candidates}
         data = await self.get(
-            "/v2/leaderboard/30d", {"limit": self.cfg.candidates}, ttl=self.cfg.discovery_ttl
+            path,
+            params,
+            ttl=self.cfg.discovery_cache_seconds,
         )
         if data.get("stale") or data.get("available") is False:
             raise Unavailable("leaderboard unavailable or stale")
+        key = (
+            "cache:"
+            + hashlib.sha256(json.dumps([path, params], sort_keys=True).encode()).hexdigest()
+        )
+        self.discovery_received_at = self.store.get(key)["at"]
         return data.get("traders", [])[: self.cfg.candidates]
 
     async def history(self, user_id: str):
