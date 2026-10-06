@@ -12,7 +12,9 @@ from fomo_spy.db import Store
 
 
 def records(path):
-    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as database:
+    # Inputs are completed backups or a fully closed migrated copy. Immutable
+    # reads avoid trying to create WAL/SHM files beside a read-only bind mount.
+    with sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True) as database:
         database.row_factory = sqlite3.Row
         database.execute("BEGIN")
         assert database.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
