@@ -91,6 +91,8 @@ class RPC:
                 delay = max(60, float(r.headers.get("retry-after", "60")))
             except ValueError:
                 delay = 60
+            gate.rate = min(rate, max(0.1, (gate.rate or rate) / 2))
+            gate.tokens = 0
             gate.cooldown = time.monotonic() + delay
             raise RPCBackoff(delay)
         # Persist safe categories, never provider messages containing URLs/keys.
@@ -147,6 +149,7 @@ class Monitor:
         self.stop = asyncio.Event()
         self.started = now()
         self.wakes = {}
+        self.round_robin = {}
 
     def wake(self, chain):
         if chain in self.wakes:
@@ -162,13 +165,14 @@ class Monitor:
                 if float(p.quantity) > 0
             }
 
-    def ready(self, chain, trader, anchor=None, reason=None):
+    def ready(self, chain, trader, anchor=None, reason=None, *, covered_at=None):
         key = f"monitor_ready:{chain}:{trader}"
         old = self.store.get(key, {})
         self.store.put(
             key,
             {
                 "ready": reason is None,
+                "covered_at": covered_at if covered_at is not None else old.get("covered_at", 0),
                 "at": now(),
                 "anchor": old.get("anchor", anchor if anchor is not None else 0),
                 "reason": reason,
@@ -203,6 +207,7 @@ class Monitor:
             network_ready = False
             while not self.stop.is_set():
                 cycle_started = time.monotonic()
+                retry_seconds = 0
                 try:
                     if not network_ready:
                         await rpc.check_network()
@@ -225,6 +230,7 @@ class Monitor:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
+                    retry_seconds = exc.seconds if isinstance(exc, RPCBackoff) else 0
                     for trader in self.wallets(chain):
                         self.ready(
                             chain.name,
@@ -241,6 +247,11 @@ class Monitor:
                             else type(exc).__name__,
                         },
                     )
+                if retry_seconds:
+                    try:
+                        await asyncio.wait_for(self.stop.wait(), retry_seconds)
+                    except TimeoutError:
+                        pass
                 try:
                     await asyncio.wait_for(wake.wait(), timeout=self.cfg.rpc_poll_seconds)
                 except TimeoutError:
@@ -291,7 +302,7 @@ class Monitor:
                 except TimeoutError:
                     pass
 
-    async def emit_movement(self, movement):
+    async def emit_movement(self, movement, *, recovery_key=None):
         sig = movement.signal
         previous = self.store.get(f"source_inventory:{sig.chain}:{sig.trader}:{sig.token}")
         if (
@@ -307,7 +318,13 @@ class Monitor:
 
             if D(previous["quantity"]) != sig.source_before:
                 await self.reorg(sig.chain, sig.block)
-        await self.emit(sig)
+        result = (
+            await self.emit(sig, recovery_key=recovery_key)
+            if recovery_key
+            else await self.emit(sig)
+        )
+        if result == "recovery pending":
+            return result
         self.store.put(
             f"source_inventory:{sig.chain}:{sig.trader}:{sig.token}",
             {
@@ -324,6 +341,8 @@ class Monitor:
                 f"research_activity:{sig.trader}:{sig.chain}",
                 {"at": sig.timestamp, "source": "canonical RPC swap", "token": sig.token},
             )
+
+        return result
 
     async def evm(self, rpc, wallets):
         head = int(await rpc.call("eth_blockNumber"), 16) - rpc.chain.confirmations
@@ -383,7 +402,7 @@ class Monitor:
                 raise Unavailable("confirmed RPC head is stale")
             checkpoint({"number": head, "hash": block["hash"]})
             for uid in wallets:
-                self.ready(chain.name, uid, head)
+                self.ready(chain.name, uid, head, covered_at=int(block["timestamp"], 16))
             return
         old = await rpc.call("eth_getBlockByNumber", [hex(cursor["number"]), False])
         if not old or old["hash"] != cursor["hash"]:
@@ -410,7 +429,7 @@ class Monitor:
             if int(old.get("timestamp", "0x0"), 16) < now() - 120:
                 raise Unavailable("confirmed RPC head is stale")
             for uid in wallets:
-                self.ready(chain.name, uid, cursor["number"])
+                self.ready(chain.name, uid, cursor["number"], covered_at=int(old["timestamp"], 16))
             return
         lo = cursor["number"] + 1
         # Fetch outgoing + incoming token logs; no generic trending-pool discovery.
@@ -437,7 +456,7 @@ class Monitor:
         )
         blocks = {}
         for uid in wallets:
-            self.ready(chain.name, uid, cursor["number"])
+            self.ready(chain.name, uid, cursor["number"], covered_at=int(old["timestamp"], 16))
         for tx, (height, _) in txs:
             if height not in blocks:
                 blocks[height] = await rpc.call("eth_getBlockByNumber", [hex(height), False])
@@ -490,6 +509,8 @@ class Monitor:
                             p.needs_reconcile = True
         block = blocks.get(end) or await rpc.call("eth_getBlockByNumber", [hex(end), False])
         checkpoint({"number": end, "hash": block["hash"]})
+        for uid in wallets:
+            self.ready(chain.name, uid, cursor["number"], covered_at=int(block["timestamp"], 16))
         self.store.put("last_chain_data", {"at": now(), "chain": chain.name, "block": end})
 
     async def solana(self, rpc, wallets):
@@ -497,8 +518,16 @@ class Monitor:
             from .inventory import SolanaCurrent
 
             tracker = SolanaCurrent(self)
-            for trader, wallet in wallets.items():
-                rpc.priority = 0 if trader in self.exit_traders(rpc.chain.name) else 10
+            exits = self.exit_traders(rpc.chain.name)
+            ordered = []
+            for priority in (True, False):
+                group = sorted(t for t in wallets if (t in exits) == priority)
+                index = self.round_robin.get((rpc.chain.name, priority), 0) % max(1, len(group))
+                ordered.extend(group[index:] + group[:index])
+                self.round_robin[(rpc.chain.name, priority)] = index + 1
+            for trader in ordered:
+                wallet = wallets[trader]
+                rpc.priority = 0 if trader in exits else 10
                 try:
                     await tracker.scan(rpc, trader, wallet)
                 except Exception as exc:
@@ -507,6 +536,8 @@ class Monitor:
                         trader,
                         reason=str(exc) if isinstance(exc, Unavailable) else type(exc).__name__,
                     )
+                    if isinstance(exc, RPCBackoff):
+                        raise
                     self.health(
                         f"inventory:{rpc.chain.name}:{trader}",
                         {

@@ -41,7 +41,9 @@ def research(cfg):
     )
     engine = Engine(cfg, store, DemoQuotes(cfg))
     engine.research.refresh(at=now() - 1)
-    store.put("monitor_ready:base:demo-7", {"ready": True, "at": now(), "anchor": 1})
+    store.put(
+        "monitor_ready:base:demo-7", {"ready": True, "at": now(), "covered_at": now(), "anchor": 1}
+    )
     yield engine
     store.close()
 
@@ -158,7 +160,9 @@ async def test_selection_epoch_clears_unwatched_inventory_without_losing_open_lo
     e.store.put(key, {"quantity": "999"})
     assert monitor.new_activation("base", "demo-7")
     assert e.store.get(key) is None
-    e.store.put("monitor_ready:base:demo-7", {"ready": True, "at": now(), "anchor": 1})
+    e.store.put(
+        "monitor_ready:base:demo-7", {"ready": True, "at": now(), "covered_at": now(), "anchor": 1}
+    )
     assert await e.event(signal()) == "processed"
     e.store.put(key, {"quantity": "100"})
     control = Control(e)

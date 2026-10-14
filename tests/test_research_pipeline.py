@@ -122,3 +122,35 @@ async def test_rpc_budget_prioritizes_exits_and_cleans_cancelled_waiter():
     await asyncio.gather(history, exit_scan)
     assert order == [0, 90]
     assert budget.inflight == 0 and budget.queue == []
+
+
+async def test_endpoint_throttle_stops_all_clients_and_reduces_rate(cfg):
+    import time
+
+    import pytest
+
+    from fomo_spy.rpc import RPC_LIMITS, RPCBackoff
+
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(429, headers={"retry-after": "60"}, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        rpc = RPC(cfg.chain("base"), http)
+        history = RPC(cfg.chain("base"), http, historical=True)
+        history.endpoint = rpc.endpoint
+        with pytest.raises(RPCBackoff):
+            await rpc.call("eth_blockNumber")
+        gate = RPC_LIMITS[http][rpc.endpoint]
+        initial_rate = gate.rate
+        with pytest.raises(RPCBackoff):
+            await history.call("eth_blockNumber")
+        assert calls == 1
+        gate.cooldown = time.monotonic() - 1
+        with pytest.raises(RPCBackoff):
+            await rpc.call("eth_blockNumber")
+        assert calls == 2
+        assert gate.rate < initial_rate <= cfg.chain("base").rpc_requests_per_second

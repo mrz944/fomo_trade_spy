@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from .activity import timeline
 from .config import Settings
-from .db import KV, Cash, Event, Ledger, Order, Position, Store
+from .db import KV, Cash, Event, Ledger, MonitorState, Order, Position, Store
 from .domain import D, Quote, Signal, now
 from .providers import Unavailable
 from .selection import ResearchPolicy
@@ -81,7 +81,7 @@ class Engine:
         return (
             self.research.allows(sig)
             and ready.get("ready", False)
-            and ready.get("at", 0) > now() - 120
+            and ready.get("covered_at", 0) > now() - 120
             and sig.block > ready.get("anchor", -1)
         )
 
@@ -146,6 +146,10 @@ class Engine:
         )
         if any(p.needs_reconcile for p in positions):
             return "inventory reconciliation required"
+        if self.cfg.selection_policy == "paper_research" and any(
+            not self.monitor_is_ready(p.chain, p.trader) for p in positions
+        ):
+            return "open position exit monitoring is stale or unresolved"
         if any(now() - p.marked_at > 60 for p in positions):
             return "position liquidation marks are stale"
         reserved = sum((D(o.data.get("reserve", "0")) for o in pending if o.side == "buy"), D(0))
@@ -188,7 +192,13 @@ class Engine:
             return "insufficient prefunded chain allocation"
         return ""
 
-    async def event(self, sig: Signal):
+    def monitor_is_ready(self, chain, trader):
+        ready = self.store.get(f"monitor_ready:{chain}:{trader}", {})
+        return ready.get("ready", False) and ready.get("covered_at", 0) >= now() - 120
+
+    async def event(self, sig: Signal, *, recovery_key=None):
+        if recovery_key is not None:
+            return await self.recover_delivery(sig, recovery_key)
         async with self.lock:
             with self.store.session() as s:
                 existing = s.get(Event, sig.key)
@@ -287,6 +297,142 @@ class Engine:
                     return reason
             return await self._execute(sig, pid, amount)
 
+    async def recover_delivery(self, sig, key):
+        """Only the durable, reconciled monitor outbox can authorize delayed paper exits."""
+        if self.cfg.mode != "paper" or self.cfg.selection_policy != "paper_research":
+            raise Unavailable("recovery is paper research only")
+        with self.store.session() as session:
+            row = session.get(MonitorState, key)
+            scan = row.data.get("scan", {}) if row else {}
+            deliveries = scan.get("deliveries", [])
+            delivery = next(
+                (d for d in deliveries if d["signal"] == sig.model_dump(mode="json")), None
+            )
+            if scan.get("stage") != "deliver" or not delivery or not sig.finalized:
+                raise Unavailable("persisted reconciled evidence required")
+            existing = session.get(Event, sig.key)
+            if existing and existing.data["block_hash"] != sig.block_hash:
+                self._halt_chain(session, sig.chain, sig.block)
+                return "recovery pending"
+            if any(not d.get("done") for d in deliveries[: deliveries.index(delivery)]):
+                raise Unavailable("earlier delivery is unresolved")
+        if sig.side == "buy":
+            if sig.historical or sig.timestamp < self.started:
+                async with self.lock:
+                    with self.store.session() as session:
+                        if not session.get(Event, sig.key):
+                            session.add(
+                                Event(
+                                    key=sig.key,
+                                    data=sig.model_dump(mode="json"),
+                                    status="rejected",
+                                    reason="historical/replay event: never copies",
+                                    received=now(),
+                                )
+                            )
+                return "historical/replay event: never copies"
+            return await self.event(sig)
+        async with self.lock:
+            pid = self.position_id(sig.trader, sig.chain, sig.token)
+            oid = "paper:" + sig.key
+            with self.store.session() as session:
+                existing = session.get(Event, sig.key)
+                if existing and existing.data["block_hash"] != sig.block_hash:
+                    self._halt_chain(session, sig.chain, sig.block)
+                    return "recovery pending"
+                order = session.get(Order, oid)
+                if session.get(Ledger, oid) or (order and order.state == "filled"):
+                    return "processed"
+                if self.store.get("chain_halt:" + sig.chain):
+                    return "recovery pending"
+                position = session.get(Position, pid)
+                if not existing:
+                    existing = Event(
+                        key=sig.key,
+                        data=sig.model_dump(mode="json"),
+                        status="received",
+                        reason="",
+                        received=now(),
+                    )
+                    session.add(existing)
+                if sig.side == "transfer":
+                    existing.status, existing.reason = (
+                        "observed",
+                        "reconciled source transfer; no copied purchase",
+                    )
+                    return "observed"
+                if not position or D(position.quantity) <= 0:
+                    existing.status, existing.reason = (
+                        "rejected",
+                        "no copied inventory for this source trader",
+                    )
+                    return "no inventory"
+                buys = list(
+                    session.scalars(
+                        select(Order).where(
+                            Order.position_id == pid, Order.side == "buy", Order.state == "filled"
+                        )
+                    )
+                )
+                origin = max(buys, key=lambda o: o.created, default=None)
+                origin_event = session.get(Event, origin.event_key) if origin else None
+                if not origin_event:
+                    return "recovery pending"
+                origin_block = origin_event.data["block"]
+                after_buy = sig.block > origin_block
+                if sig.block == origin_block:
+                    block = session.get(MonitorState, scan["blocks"][str(sig.block)])
+                    canonical = block.data["value"]["signatures"] if block else []
+                    if origin_event.data["tx"] in canonical and sig.tx in canonical:
+                        after_buy = canonical.index(sig.tx) > canonical.index(
+                            origin_event.data["tx"]
+                        )
+                if not after_buy:
+                    existing.status, existing.reason = "rejected", "sale precedes copied purchase"
+                    return "sale precedes copied purchase"
+                if (
+                    sig.source_before is None
+                    or sig.source_after is None
+                    or sig.source_before <= 0
+                    or sig.source_before - sig.quantity != sig.source_after
+                ):
+                    position.needs_reconcile = True
+                    return "recovery pending"
+                amount = int(
+                    D(position.quantity) * sig.quantity / sig.source_before * 10**position.decimals
+                )
+                if amount <= 0:
+                    existing.status, existing.reason = "rejected", "exit below token precision"
+                    return "exit below token precision"
+                data = dict(existing.data)
+                history = list(data.get("rejection_history", []))
+                if existing.reason and existing.reason not in history:
+                    history.append(existing.reason)
+                data.update(
+                    rejection_history=history,
+                    recovery={
+                        "source_at": sig.timestamp,
+                        "recovered_at": now(),
+                        "evidence_key": f"evidence:{key}:{scan['lower']}:{scan['slot']}",
+                        "provenance": "delayed paper exit at current quote",
+                        "delayed": bool(
+                            sig.historical
+                            or sig.timestamp < self.started
+                            or now() - sig.timestamp > self.cfg.max_signal_age
+                            or history
+                        ),
+                    },
+                )
+                existing.data = data
+                if order:
+                    if order.state not in ("prepared", "rejected", "cancelled"):
+                        return "recovery pending"
+                    session.delete(
+                        order
+                    )  # No ledger exists; obtain a new current executable quote.
+            result = await self._execute(sig, pid, amount, recovery=data["recovery"])
+            return "processed" if result == "processed" else "recovery pending"
+
     async def paper_bridge(self, destination):
         if self.cfg.mode != "paper":
             raise Unavailable("automatic live bridging is not validated")
@@ -375,7 +521,7 @@ class Engine:
                 "bridge", {"state": "unavailable", "error": type(exc).__name__, "at": now()}
             )
 
-    async def _execute(self, sig, pid, amount, manual=False):
+    async def _execute(self, sig, pid, amount, manual=False, recovery=None):
         order_id = self.cfg.mode + ":" + sig.key
         try:
             quote = await self.quotes.quote(
@@ -424,6 +570,7 @@ class Engine:
                             "decimals": sig.token_decimals,
                             "signal_at": sig.timestamp,
                             "manual": manual,
+                            "recovery": recovery,
                             "selection_policy": policy,
                             "reserve": str(quote.usd + quote.fee_usd) if sig.side == "buy" else "0",
                             "quote": quote.model_dump(mode="json"),
@@ -481,7 +628,7 @@ class Engine:
                 if e:
                     e.status, e.reason = "rejected", message
                 p = s.get(Position, pid)
-                if sig.side == "sell" and p:
+                if sig.side == "sell" and p and recovery is None:
                     p.needs_reconcile = True
             return message
 
@@ -565,7 +712,8 @@ class Engine:
                 cash.balance = str(D(cash.balance) + proceeds)
                 delta = proceeds
             p.marked_at = now()
-            p.needs_reconcile = False
+            if not o.data.get("recovery"):
+                p.needs_reconcile = False
             s.add(
                 Ledger(
                     id=order_id,
@@ -575,6 +723,10 @@ class Engine:
                     cash_delta=str(delta),
                     realized=str(realized),
                     details={
+                        "recovery": o.data.get("recovery"),
+                        "execution_price_usd": str((delta + fee) / quantity)
+                        if o.side == "sell"
+                        else str(q.usd / quantity),
                         "fee_usd": str(fee),
                         "output_atomic": output,
                         "side": o.side,
@@ -754,6 +906,12 @@ class Engine:
                     ),
                     D(0),
                 )
+            if self.cfg.selection_policy == "paper_research" and (
+                p.needs_reconcile or not self.monitor_is_ready(p.chain, p.trader)
+            ):
+                raise Unavailable(
+                    "chain history must reconcile; current balance cannot clear a monitoring gap"
+                )
             c = self.cfg.chain(p.chain)
             source = (
                 self.store.get("trader:" + p.trader, {})
@@ -925,6 +1083,7 @@ class Engine:
             }
         return {
             "workflow": self.workflow(events, orders),
+            "monitoring": self.monitoring_status(),
             "mode": self.cfg.mode,
             "selection_policy": self.cfg.selection_policy,
             "policy_performance": {
@@ -972,6 +1131,7 @@ class Engine:
                         for k in ("id", "side", "state", "created", "tx_hash", "error")
                     },
                     "selection_policy": o.data.get("selection_policy", "verified"),
+                    "recovery": o.data.get("recovery"),
                 }
                 for o in orders
             ],
@@ -1000,6 +1160,66 @@ class Engine:
                 for c in self.cfg.chains
             ],
         }
+
+    def monitoring_status(self):
+        rows = []
+        watched = {(c.name, t) for c in self.cfg.chains for t in self.watched(c.name)}
+        with self.store.session() as session:
+            for record in session.scalars(
+                select(MonitorState).where(MonitorState.key.startswith("solana:"))
+            ):
+                parts = record.key.split(":")
+                if len(parts) != 4 or (parts[0], parts[1]) not in watched:
+                    continue
+                state = record.data
+                scan = state.get("scan", {})
+                covered = state.get("covered_at")
+                rows.append(
+                    dict(
+                        key=record.key,
+                        chain=parts[0],
+                        trader=parts[1],
+                        wallet=parts[2],
+                        program=parts[3],
+                        checkpoint=state.get("slot"),
+                        covered_at=covered,
+                        checkpoint_age=now() - covered if covered else None,
+                        target_slot=scan.get("slot"),
+                        stage=scan.get("stage", "idle"),
+                        last_progress=state.get("last_progress", state.get("at")),
+                        retry_at=state.get("retry_at"),
+                        pending_recoveries=sum(
+                            not d.get("done") and d["signal"]["side"] == "sell"
+                            for d in scan.get("deliveries", [])
+                        ),
+                        blocking_reason=state.get("blocking_reason"),
+                    )
+                )
+        for key, cursor in self.store.items("cursor:evm:").items():
+            _, _, chain, trader, wallet = key.split(":")
+            if not cursor or (chain, trader) not in watched:
+                continue
+            ready = self.store.get(f"monitor_ready:{chain}:{trader}", {})
+            covered = ready.get("covered_at")
+            rows.append(
+                dict(
+                    key=key,
+                    chain=chain,
+                    trader=trader,
+                    wallet=wallet,
+                    program="evm",
+                    checkpoint=cursor.get("number"),
+                    covered_at=covered,
+                    checkpoint_age=now() - covered if covered else None,
+                    target_slot=None,
+                    stage="idle" if ready.get("ready") else "blocked",
+                    last_progress=ready.get("at"),
+                    retry_at=None,
+                    pending_recoveries=0,
+                    blocking_reason=ready.get("reason"),
+                )
+            )
+        return rows
 
     def workflow(self, events, orders):
         ranks = self.rankings()
@@ -1039,15 +1259,11 @@ class Engine:
             state = "paper execution observed"
         history_blockers = blockers
         pairs, entry_ready, exit_watched = [], 0, 0
+        affected, oldest_exit = [], None
         if self.cfg.selection_policy == "paper_research":
             capabilities = self.store.items("current_capability:")
             pairs = self.research.pairs()
-            entry_ready = sum(
-                self.store.get(f"monitor_ready:{p['chain']}:{p['trader']}", {}).get("ready", False)
-                and self.store.get(f"monitor_ready:{p['chain']}:{p['trader']}", {}).get("at", 0)
-                >= now() - 120
-                for p in pairs
-            )
+            entry_ready = sum(self.monitor_is_ready(p["chain"], p["trader"]) for p in pairs)
             blockers = [
                 f"{c.name}: "
                 + self.store.get("current_capability:" + c.name, {}).get(
@@ -1066,7 +1282,7 @@ class Engine:
                 + (r.get("reason") or "monitor baseline pending or stale")
                 for p in pairs
                 for r in [self.store.get(f"monitor_ready:{p['chain']}:{p['trader']}", {})]
-                if not r.get("ready") or r.get("at", 0) < now() - 120
+                if not self.monitor_is_ready(p["chain"], p["trader"])
             )
             if self.store.get("paused:" + self.cfg.mode, False):
                 blockers.append("entries paused by operator")
@@ -1082,6 +1298,26 @@ class Engine:
                 exit_watched = len(
                     {(p.trader, p.chain) for p in paper_positions if D(p.quantity) > 0}
                 )
+                open_positions = [p for p in paper_positions if D(p.quantity) > 0]
+                affected = [
+                    dict(
+                        id=p.id,
+                        trader=p.trader,
+                        chain=p.chain,
+                        token=p.token,
+                        reason="inventory reconciliation required"
+                        if p.needs_reconcile
+                        else "exit checkpoint stale or unresolved",
+                    )
+                    for p in open_positions
+                    if p.needs_reconcile or not self.monitor_is_ready(p.chain, p.trader)
+                ]
+                ages = [
+                    now()
+                    - self.store.get(f"monitor_ready:{p.chain}:{p.trader}", {}).get("covered_at", 0)
+                    for p in open_positions
+                ]
+                oldest_exit = max(ages) if ages else None
                 reconciliation = any(
                     p.needs_reconcile and D(p.quantity) > 0 for p in paper_positions
                 )
@@ -1108,6 +1344,14 @@ class Engine:
             )
             if observed and self.store.get("environment") == "real" and entry_ready:
                 state = "paper execution observed"
+            if affected:
+                entry_ready = 0
+                state = "exit monitoring degraded"
+                blockers = [
+                    f"{p['chain']}:{p['trader']}:{p['token']}: {p['reason']}" for p in affected
+                ] + blockers
+            if self.store.get("paused:" + self.cfg.mode, False):
+                entry_ready = 0
             if reconciliation:
                 state = "reconciliation required"
         return {
@@ -1121,6 +1365,11 @@ class Engine:
             "selected_pairs": pairs,
             "entry_ready": entry_ready,
             "exit_watched": exit_watched,
+            "exit_ready": exit_watched - len({(p["trader"], p["chain"]) for p in affected}),
+            "affected_positions": affected,
+            "oldest_exit_checkpoint_age": oldest_exit,
+            "pending_recoveries": sum(r["pending_recoveries"] for r in self.monitoring_status()),
+            "transport": {k: v for k, v in self.store.items("health:rpc:").items()},
             "historical_blockers": history_blockers,
             "history_backfill_enabled": self.cfg.backfill_enabled,
             "evaluated": evaluated,

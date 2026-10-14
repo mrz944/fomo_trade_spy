@@ -126,3 +126,44 @@ running image's OCI revision label. Runtime deployment evidence is separate
 from the historical [development verification](../docs/verification.md).
 Deployment is not validation of unfinished discovery/history normalization,
 general Relay signing, live bridging, historical indexing or funded live trades.
+
+## Durable monitoring and delayed paper exits
+
+Solana paper research scans retain their committed inventory plus a versioned
+pending target in `monitor_states`. Each turn saves up to ten signature pages
+and forty evidence requests; the next turn resumes the same snapshot. Both
+SPL token programs must have recent covered chain time for entry readiness.
+Unknown older records retain their checkpoints and require a new scan before
+becoming ready. No baseline reset repairs a gap.
+
+The reconciled outbox is the only admission path for delayed paper exits.
+Sales use whole-mint source inventory and current exact-size quotes. Old buys
+are never replayed. Quote failures retain deliveries, and order/ledger identity
+prevents duplicate settlement across restarts. Previously rejected sales are
+revalidated against canonical transactions and committed inventory. Raw evidence
+is retained under `evidence:` records when deliveries complete. Ambiguous token
+routes, missing history, or conflicting blocks remain blockers. Recovery preserves
+existing reconciliation flags; a balance-only reconciliation cannot clear them.
+
+The status `monitoring` array reports wallet/program checkpoints, covered time,
+target slot, stage, last progress, retry time, pending exits, and blocking reason.
+`workflow` separates transport, entry readiness, and exit readiness and includes
+deselected traders with open positions. Any stale/unresolved open position stops
+new entries globally; evidence collection and verified exits continue.
+
+Before rollout, make a SQLite online backup and run the built revision against
+isolated copies (mount only the completed backup, never the live database):
+
+```sh
+python deploy/verify_migration.py /backup/spy.sqlite /verification/compatible.sqlite
+python deploy/verify_recovery.py /backup/spy.sqlite /verification/synthetic.sqlite
+```
+
+The second command simulates an exit for an existing Solana paper position with
+networking disabled. It verifies accounting and duplicate prevention, not actual
+historical chain coverage. Run the Mac/Linux regression suites before replacing
+the FOMO image tag. Preserve config, credentials, chain allocations, and other
+services. Start a new `deploy/observe.py --output ...` run after rollout; its
+24-hour report counts fills by ledger timestamp within that window, separates
+fresh buys/exits from delayed recoveries, and measures checkpoint advancement
+and monitoring gaps. A running observation is not completed acceptance.

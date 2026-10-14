@@ -45,7 +45,7 @@ class SpyApp(App):
     TITLE = "FOMO Trade Spy"
     SUB_TITLE = "daemon client"
     CSS = """
-    #summary { height: 5; padding: 0 1; background: $boost; }
+    #summary { height: 8; padding: 0 1; background: $boost; }
     #message { height: 2; padding: 0 1; }
     DataTable { height: 1fr; }
     Input { dock: bottom; }
@@ -148,7 +148,12 @@ class SpyApp(App):
                     f"Entries {'PAUSED' if s['paused'] else 'enabled'}  |  "
                     f"Selected {len(s['selected'])} / Watching {len(s['watching'])}\n"
                     f"Workflow: {s.get('workflow', {}).get('state', 'unknown')} | "
-                    f"Evaluated: {s.get('workflow', {}).get('evaluated', 0)}\n"
+                    f"Entry ready: {s.get('workflow', {}).get('entry_ready', 0)} | "
+                    f"Exit ready: {s.get('workflow', {}).get('exit_ready', 0)}/{s.get('workflow', {}).get('exit_watched', 0)}\n"
+                    f"Oldest exit checkpoint age: {s.get('workflow', {}).get('oldest_exit_checkpoint_age')}s | "
+                    f"Pending recoveries: {s.get('workflow', {}).get('pending_recoveries', 0)}\n"
+                    f"Affected positions: {', '.join(p['token'] for p in s.get('workflow', {}).get('affected_positions', [])) or 'none'}\n"
+                    f"Latest decision: {s.get('workflow', {}).get('latest_trade_decision')}\n"
                     f"{'; '.join(s.get('workflow', {}).get('blockers', [])[:1]) or 'Awaiting fresh source activity'}"
                 )
                 self.table(

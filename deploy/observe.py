@@ -20,7 +20,7 @@ def command(*args):
     return result.stdout
 
 
-def accounting(database):
+def accounting(database, since=0):
     with sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=10) as db:
         db.execute("BEGIN")
         integrity = db.execute("PRAGMA quick_check").fetchone()[0]
@@ -33,6 +33,16 @@ def accounting(database):
             Decimal(0),
         )
         return {
+            "window_fills": dict(
+                db.execute(
+                    "SELECT json_extract(details,'$.side'),count(*) FROM ledger WHERE mode='paper' AND timestamp>=? GROUP BY 1",
+                    (since,),
+                )
+            ),
+            "recovered_exits": db.execute(
+                "SELECT count(*) FROM ledger WHERE mode='paper' AND timestamp>=? AND json_extract(details,'$.recovery.delayed')=1",
+                (since,),
+            ).fetchone()[0],
             "integrity": integrity,
             "cash": str(cash),
             "ledger_cash_delta": str(delta),
@@ -55,6 +65,33 @@ def accounting(database):
                 "SELECT count(*) FROM positions WHERE needs_reconcile=1"
             ).fetchone()[0],
         }
+
+
+def observation_metrics(rows):
+    successful = [r for r in rows if r.get("ok")]
+    first = successful[0] if successful else {}
+    last = successful[-1] if successful else {}
+    initial = {r["key"]: r.get("checkpoint", 0) for r in first.get("monitoring", [])}
+    fills = last.get("accounting", {}).get("window_fills", {})
+    recovered = last.get("accounting", {}).get("recovered_exits", 0)
+    buys, exits = fills.get("buy", 0), fills.get("sell", 0) - recovered
+    return {
+        "fresh_buy_fills": buys,
+        "fresh_exit_fills": exits,
+        "recovered_exit_fills": recovered,
+        "fresh_paper_execution_observed": buys + exits > 0,
+        "execution_acceptance": "observed"
+        if buys and exits
+        else "pending qualifying source transactions",
+        "checkpoint_advancement": {
+            r["key"]: r.get("checkpoint", 0) - initial[r["key"]]
+            for r in last.get("monitoring", [])
+            if r["key"] in initial
+        },
+        "monitoring_gap_samples": sum(
+            bool(r.get("workflow", {}).get("affected_positions")) for r in successful
+        ),
+    }
 
 
 def main():
@@ -122,7 +159,8 @@ def main():
             workflow = status.get("workflow", {})
             sample["workflow"] = {k: v for k, v in workflow.items() if k != "capabilities"}
             sample["health"] = status.get("health")
-            sample["accounting"] = accounting(args.database)
+            sample["accounting"] = accounting(args.database, meta["started"])
+            sample["monitoring"] = status.get("monitoring", [])
             sample["service"] = command(
                 "systemctl",
                 "--user",
@@ -150,9 +188,7 @@ def main():
                 "first": rows[0],
                 "last": rows[-1],
                 "completed": True,
-                "fresh_paper_execution_observed": any(
-                    r.get("workflow", {}).get("observed_fills", 0) > 0 for r in rows
-                ),
+                **observation_metrics(rows),
                 "accounting_errors": [
                     r["at"]
                     for r in rows

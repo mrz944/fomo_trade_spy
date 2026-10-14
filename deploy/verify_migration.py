@@ -30,12 +30,12 @@ def records(path):
             for record in database.execute('SELECT * FROM "' + table.replace('"', '""') + '"'):
                 row = dict(record)
                 if table == "positions":
-                    assert row.pop("selection_policy", "verified") == "verified"
+                    row.setdefault("selection_policy", "verified")
                 for field in ("data", "details", "value"):
                     if field in row:
                         row[field] = json.loads(row[field])
                         if table in ("orders", "ledger"):
-                            assert row[field].pop("selection_policy", "verified") == "verified"
+                            row[field].setdefault("selection_policy", "verified")
                 rows.append(json.dumps(row, sort_keys=True))
             result[table] = {
                 "rows": len(rows),
