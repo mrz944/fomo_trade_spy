@@ -33,7 +33,9 @@ def records(path):
                     row.setdefault("selection_policy", "verified")
                 for field in ("data", "details", "value"):
                     if field in row:
-                        row[field] = json.loads(row[field])
+                        row[field] = (
+                            json.loads(row[field]) if isinstance(row[field], str) else row[field]
+                        )
                         if table in ("orders", "ledger"):
                             row[field].setdefault("selection_policy", "verified")
                 rows.append(json.dumps(row, sort_keys=True))

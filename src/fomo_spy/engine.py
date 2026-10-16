@@ -408,19 +408,22 @@ class Engine:
                 history = list(data.get("rejection_history", []))
                 if existing.reason and existing.reason not in history:
                     history.append(existing.reason)
+                delayed = bool(
+                    sig.historical
+                    or sig.timestamp < self.started
+                    or now() - sig.timestamp > self.cfg.max_signal_age
+                    or history
+                )
                 data.update(
                     rejection_history=history,
                     recovery={
                         "source_at": sig.timestamp,
                         "recovered_at": now(),
                         "evidence_key": f"evidence:{key}:{scan['lower']}:{scan['slot']}",
-                        "provenance": "delayed paper exit at current quote",
-                        "delayed": bool(
-                            sig.historical
-                            or sig.timestamp < self.started
-                            or now() - sig.timestamp > self.cfg.max_signal_age
-                            or history
-                        ),
+                        "provenance": "delayed paper exit at current quote"
+                        if delayed
+                        else "verified paper exit at current quote",
+                        "delayed": delayed,
                     },
                 )
                 existing.data = data
@@ -592,6 +595,7 @@ class Engine:
                 e = s.get(Event, sig.key)
                 if e:
                     e.status = "processed"
+                    e.reason = recovery["provenance"] if recovery else ""
             self.store.put(
                 "decision:" + sig.key,
                 {

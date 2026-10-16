@@ -33,6 +33,18 @@ def accounting(database, since=0):
             Decimal(0),
         )
         return {
+            "fresh_source_fills": dict(
+                db.execute(
+                    "SELECT o.side,count(*) FROM ledger l JOIN orders o ON o.id=l.id "
+                    "JOIN events e ON e.key=o.event_key WHERE l.mode='paper' AND l.timestamp>=? "
+                    "AND json_extract(e.data,'$.provider')='rpc' "
+                    "AND json_extract(e.data,'$.finalized')=1 "
+                    "AND coalesce(json_extract(e.data,'$.historical'),0)=0 "
+                    "AND coalesce(json_extract(o.data,'$.manual'),0)=0 "
+                    "AND coalesce(json_extract(l.details,'$.recovery.delayed'),0)=0 GROUP BY o.side",
+                    (since,),
+                )
+            ),
             "window_fills": dict(
                 db.execute(
                     "SELECT json_extract(details,'$.side'),count(*) FROM ledger WHERE mode='paper' AND timestamp>=? GROUP BY 1",
@@ -40,7 +52,7 @@ def accounting(database, since=0):
                 )
             ),
             "recovered_exits": db.execute(
-                "SELECT count(*) FROM ledger WHERE mode='paper' AND timestamp>=? AND json_extract(details,'$.recovery.delayed')=1",
+                "SELECT count(*) FROM ledger WHERE mode='paper' AND timestamp>=? AND json_extract(details,'$.recovery.delayed')=1 AND json_extract(details,'$.side')='sell'",
                 (since,),
             ).fetchone()[0],
             "integrity": integrity,
@@ -72,9 +84,9 @@ def observation_metrics(rows):
     first = successful[0] if successful else {}
     last = successful[-1] if successful else {}
     initial = {r["key"]: r.get("checkpoint", 0) for r in first.get("monitoring", [])}
-    fills = last.get("accounting", {}).get("window_fills", {})
+    fills = last.get("accounting", {}).get("fresh_source_fills", {})
     recovered = last.get("accounting", {}).get("recovered_exits", 0)
-    buys, exits = fills.get("buy", 0), fills.get("sell", 0) - recovered
+    buys, exits = fills.get("buy", 0), fills.get("sell", 0)
     return {
         "fresh_buy_fills": buys,
         "fresh_exit_fills": exits,

@@ -443,6 +443,7 @@ async def test_recorded_unexecuted_sale_revalidated_from_committed_inventory(sol
     with engine.store.session() as session:
         event = session.get(Event, sig.key)
         assert event.status == "processed"
+        assert event.reason == "delayed paper exit at current quote"
         assert "historical/replay event: never copies" in event.data["rejection_history"]
         assert session.get(MonitorState, event.data["recovery"]["evidence_key"])
     await SolanaCurrent(monitor).scan(rpc, "u", WALLET)

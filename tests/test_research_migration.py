@@ -56,3 +56,36 @@ def test_existing_cash_lots_orders_audit_survive_additive_policy_migration(tmp_p
             assert a == b
         assert connection.execute(text("PRAGMA integrity_check")).scalar() == "ok"
     store.close()
+
+
+def test_backup_verifier_preserves_json_scalars_and_current_policy(tmp_path):
+    import importlib.util
+    import shutil
+
+    path = tmp_path / "source.sqlite"
+    store = db.Store(path)
+    for key, value in {"number": 1.25, "integer": 1, "null": None, "boolean": True}.items():
+        store.put(key, value)
+    with store.session() as session:
+        session.add(
+            db.Position(
+                id="p",
+                mode="paper",
+                trader="u",
+                chain="solana",
+                token="token",
+                decimals=6,
+                selection_policy="paper_research",
+            )
+        )
+    store.close()
+    spec = importlib.util.spec_from_file_location(
+        "verify_migration", Path(__file__).parents[1] / "deploy/verify_migration.py"
+    )
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+    before = verifier.records(path)
+    destination = tmp_path / "copy.sqlite"
+    shutil.copy2(path, destination)
+    db.Store(destination).close()
+    assert verifier.records(destination) == before
