@@ -308,7 +308,12 @@ class Engine:
             delivery = next(
                 (d for d in deliveries if d["signal"] == sig.model_dump(mode="json")), None
             )
-            if scan.get("stage") != "deliver" or not delivery or not sig.finalized:
+            if (
+                scan.get("stage") != "deliver"
+                or not delivery
+                or not sig.finalized
+                or sig.token in scan.get("gaps", [])
+            ):
                 raise Unavailable("persisted reconciled evidence required")
             existing = session.get(Event, sig.key)
             if existing and existing.data["block_hash"] != sig.block_hash:
@@ -1197,6 +1202,7 @@ class Engine:
                             for d in scan.get("deliveries", [])
                         ),
                         blocking_reason=state.get("blocking_reason"),
+                        unreconciled_tokens=scan.get("gaps", []),
                     )
                 )
         for key, cursor in self.store.items("cursor:evm:").items():

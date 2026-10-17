@@ -142,7 +142,11 @@ are never replayed. Quote failures retain deliveries, and order/ledger identity
 prevents duplicate settlement across restarts. Previously rejected sales are
 revalidated against canonical transactions and committed inventory. Raw evidence
 is retained under `evidence:` records when deliveries complete. Ambiguous token
-routes, missing history, or conflicting blocks remain blockers. Recovery preserves
+routes, missing history, or conflicting blocks remain blockers for affected copied
+mints. Historical trades in unrelated mints cannot create copied positions and do
+not require exit reconciliation. Fresh unrelated mint gaps remain explicit and
+hold the program checkpoint, while verified exits for other mints can still run.
+Recovery preserves
 existing reconciliation flags; a balance-only reconciliation cannot clear them.
 
 The status `monitoring` array reports wallet/program checkpoints, covered time,

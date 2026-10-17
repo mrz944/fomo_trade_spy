@@ -188,7 +188,7 @@ class SolanaCurrent:
         covered = min(
             (
                 s.get("scan", {}).get("covered_at", 0)
-                if s.get("scan", {}).get("stage") == "deliver"
+                if s.get("scan", {}).get("stage") == "deliver" and not s.get("scan", {}).get("gaps")
                 else s.get("covered_at", 0)
             )
             for s in states
@@ -229,6 +229,8 @@ class SolanaCurrent:
                     self.monitor.ready(
                         rpc.chain.name, trader, reason=state["blocking_reason"], covered_at=covered
                     )
+                    if errors:
+                        raise next((e for e in errors if isinstance(e, RPCBackoff)), errors[0])
                     return
                 delivery["done"] = True
                 self.save(key, state)
@@ -236,26 +238,35 @@ class SolanaCurrent:
                 if scan["deliveries"]:
                     session.merge(
                         MonitorState(
-                            key=f"evidence:{key}:{scan['lower']}:{scan['slot']}", data=state
+                            key=f"evidence:{key}:{scan['lower']}:{scan['slot']}",
+                            data=copy.deepcopy(state),
                         )
                     )
-                session.merge(
-                    MonitorState(
-                        key=key,
-                        data={
-                            "version": 2,
-                            "slot": scan["slot"],
-                            "anchor": state["anchor"],
-                            "accounts": scan["accounts"],
-                            "at": now(),
-                            "covered_at": scan["covered_at"],
-                            "activation": state.get("activation"),
-                            "last_progress": now(),
-                        },
+                if scan.get("gaps"):
+                    scan["stage"] = "reconcile"
+                    state["blocking_reason"] = (
+                        "current token accounts do not reconcile; history gap retained"
                     )
-                )
+                    session.merge(MonitorState(key=key, data=state))
+                    errors.append(Unavailable(state["blocking_reason"]))
+                else:
+                    session.merge(
+                        MonitorState(
+                            key=key,
+                            data={
+                                "version": 2,
+                                "slot": scan["slot"],
+                                "anchor": state["anchor"],
+                                "accounts": scan["accounts"],
+                                "at": now(),
+                                "covered_at": scan["covered_at"],
+                                "activation": state.get("activation"),
+                                "last_progress": now(),
+                            },
+                        )
+                    )
         if errors:
-            raise errors[0]
+            raise next((e for e in errors if isinstance(e, RPCBackoff)), errors[0])
 
     async def scan_program(self, rpc, trader, wallet, program):
         chain = rpc.chain.name
@@ -347,6 +358,7 @@ class SolanaCurrent:
         signatures = await self.signatures(rpc, wallet, scan["lower"], slot)
         scan["stage"] = "transactions"
         transactions = {sig: await self.transaction(rpc, sig) for sig in signatures}
+        # Old trades only require inventory reconciliation for existing copied mints.
         relevant = set(open_mints)
         discovered = dict(state["accounts"])
         discovered.update(snapshot)
@@ -359,6 +371,8 @@ class SolanaCurrent:
                     tx, trader, wallet, "discovery", rpc.chain, self.monitor.started
                 )
                 if m.signal.side in ("buy", "sell")
+                and not m.signal.historical
+                and now() - m.signal.timestamp <= self.monitor.cfg.max_signal_age
             )
         relevant -= {rpc.chain.settlement, WSOL}
         relevant &= {a["mint"] for a in discovered.values() if a["program"] == program}
@@ -527,10 +541,20 @@ class SolanaCurrent:
                     "at": now(),
                 },
             )
-        if gaps:
-            raise Unavailable("current token accounts do not reconcile; history gap retained")
-        scan["stage"] = "deliver"
-        scan["deliveries"] = [
-            {"signal": m.signal.model_dump(mode="json"), "done": False} for m in pending
+        previous = {Signal.model_validate(d["signal"]).key: d for d in scan.get("deliveries", [])}
+        deliveries = [
+            previous.get(m.signal.key, {"signal": m.signal.model_dump(mode="json"), "done": False})
+            for m in pending
+            if m.signal.token not in gaps
         ]
-        self.progress()
+        if set(scan.get("gaps", [])) != gaps or any(not d["done"] for d in deliveries):
+            state["last_progress"] = now()
+        scan.update(stage="deliver", gaps=sorted(gaps), deliveries=deliveries)
+        state.pop("retry_at", None)
+        if gaps:
+            state["blocking_reason"] = (
+                "current token accounts do not reconcile; history gap retained"
+            )
+        else:
+            state.pop("blocking_reason", None)
+        self.save(key, state)

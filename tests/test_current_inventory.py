@@ -637,3 +637,85 @@ async def test_isolated_backup_recovery_verifier(solana, tmp_path):
     assert engine.snapshot()["positions"]
     with pytest.raises(ValueError, match="isolated"):
         await module.verify(backup, backup)
+
+
+@pytest.mark.parametrize("historical_other", [False, True])
+async def test_unrelated_gap_allows_verified_exit_without_committing_checkpoint(
+    solana, historical_other
+):
+    from sqlalchemy import select
+
+    from fomo_spy.db import Ledger, MonitorState
+    from fomo_spy.providers import Unavailable
+
+    engine, monitor, rpc, scenario = solana
+    scenario.balances["account-unrelated"] = 100_000_000
+    original = scenario.call
+
+    async def with_other_mint(method, params):
+        result = await original(method, params)
+        if method == "getTokenAccountsByOwner":
+            for row in result["value"]:
+                if row["pubkey"] == "account-unrelated":
+                    row["account"]["data"]["parsed"]["info"]["mint"] = "unrelated"
+        if method == "getTransaction":
+            addresses = result["transaction"]["message"]["accountKeys"]
+            for field in ("preTokenBalances", "postTokenBalances"):
+                for row in result["meta"][field]:
+                    if addresses[row["accountIndex"]] == "account-unrelated":
+                        row["mint"] = "unrelated"
+        return result
+
+    rpc.call.side_effect = with_other_mint
+    await SolanaCurrent(monitor).scan(rpc, "u", WALLET)
+    scenario.tx("buy", {"account-a": 100_000_000})
+    await SolanaCurrent(monitor).scan(rpc, "u", WALLET)
+    scenario.tx("other-buy", {"account-unrelated": 200_000_000})
+    scenario.tx("unknown-other-route", {"account-unrelated": 150_000_000})
+    tx = scenario.transactions["unknown-other-route"]
+    tx["meta"]["postBalances"][0] = tx["meta"]["preBalances"][0] - 5000
+    scenario.tx("verified-exit", {"account-a": 0, "account-b": 0})
+    engine.store.put("paused:paper", True)
+    if historical_other:
+        engine.started = monitor.started = now() + 2
+        await SolanaCurrent(monitor).scan(rpc, "u", WALLET)
+    else:
+        with pytest.raises(Unavailable, match="do not reconcile"):
+            await SolanaCurrent(monitor).scan(rpc, "u", WALLET)
+    assert not engine.snapshot()["positions"]
+    key = f"solana:u:{WALLET}:{scenario.program}"
+    with engine.store.session() as session:
+        state = session.get(MonitorState, key).data
+        assert state["slot"] == (scenario.slot if historical_other else 11)
+        if not historical_other:
+            assert state["scan"]["gaps"] == ["unrelated"]
+            assert all(d["signal"]["token"] != "unrelated" for d in state["scan"]["deliveries"])
+        assert session.get(MonitorState, f"evidence:{key}:11:{scenario.slot}")
+    engine = Engine(engine.cfg, engine.store, engine.quotes)
+    monitor.emit = engine.event
+    if historical_other:
+        await SolanaCurrent(monitor).scan(rpc, "u", WALLET)
+    else:
+        with pytest.raises(Unavailable, match="do not reconcile"):
+            await SolanaCurrent(monitor).scan(rpc, "u", WALLET)
+    with engine.store.session() as session:
+        assert len(list(session.scalars(select(Ledger)))) == 2
+        if not historical_other:
+            assert session.get(MonitorState, key).data["last_progress"] == state["last_progress"]
+
+
+async def test_rate_limit_propagates_even_after_other_program_failure(solana):
+    from fomo_spy.providers import Unavailable
+    from fomo_spy.rpc import RPCBackoff
+
+    engine, monitor, rpc, scenario = solana
+
+    async def fail(method, params):
+        assert method == "getTokenAccountsByOwner"
+        if params[1]["programId"] == TOKEN:
+            raise Unavailable("snapshot unavailable")
+        raise RPCBackoff(60)
+
+    rpc.call.side_effect = fail
+    with pytest.raises(RPCBackoff):
+        await monitor.solana(rpc, {"u": WALLET})
